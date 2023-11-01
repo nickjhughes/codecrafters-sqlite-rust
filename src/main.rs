@@ -2,6 +2,9 @@ use anyhow::{bail, Result};
 
 mod database;
 mod header;
+mod page;
+mod record;
+mod varint;
 
 fn main() -> Result<()> {
     // Parse arguments
@@ -20,6 +23,7 @@ fn main() -> Result<()> {
             let db = database::Database::parse(&db_data)?;
 
             println!("database page size: {}", db.header.page_size);
+            println!("number of tables: {}", db.pages[0].records.len());
         }
         _ => bail!("Missing or invalid command passed: {}", command),
     }
