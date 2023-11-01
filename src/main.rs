@@ -33,14 +33,9 @@ fn main() -> Result<()> {
         }
         query_str => {
             let query = Query::parse(query_str)?;
-            match query {
-                Query::Select(select) => {
-                    let table_root_page = db.schema.table_root_page(&select.table_name)?;
-                    let page = db.parse_page(&db_data, table_root_page)?;
-
-                    println!("{}", page.records.len());
-                }
-                _ => todo!(),
+            let results = query.execute(&db, &db_data)?;
+            for row in results.iter() {
+                println!("{}", row.join("|"));
             }
         }
     }

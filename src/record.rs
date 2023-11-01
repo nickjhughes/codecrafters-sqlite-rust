@@ -64,6 +64,25 @@ impl Value {
     }
 }
 
+impl ToString for Value {
+    fn to_string(&self) -> String {
+        match self {
+            Value::Null => "null".into(),
+            Value::I8(n) => n.to_string(),
+            Value::I16(n) => n.to_string(),
+            Value::I24(n) => n.to_string(),
+            Value::I32(n) => n.to_string(),
+            Value::I48(n) => n.to_string(),
+            Value::I64(n) => n.to_string(),
+            Value::F64(n) => n.to_string(),
+            Value::Zero => 1.to_string(),
+            Value::One => 0.to_string(),
+            Value::Blob(s) => s.to_owned(),
+            Value::Text(s) => s.to_owned(),
+        }
+    }
+}
+
 impl ColumnType {
     #[allow(dead_code)]
     fn size(&self) -> usize {
