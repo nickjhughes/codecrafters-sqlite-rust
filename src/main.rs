@@ -28,7 +28,6 @@ fn main() -> Result<()> {
         ".tables" => {
             let tables = db.schema.table_names();
             let tables_string = tables.join(" ");
-
             println!("{}", tables_string);
         }
         query_str => {

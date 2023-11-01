@@ -48,7 +48,8 @@ impl Query {
                 } else if next_token.to_ascii_lowercase().contains("count") {
                     columns.push(Column::Count);
                 } else {
-                    columns.push(Column::ColumnName(next_token.to_owned()))
+                    let column_name = next_token.trim_start_matches(',').trim_end_matches(',');
+                    columns.push(Column::ColumnName(column_name.to_owned()))
                 }
             }
 
@@ -86,7 +87,7 @@ impl Query {
         match self {
             Query::Select(select) => {
                 let table_root_page = db.schema.table_root_page(&select.table_name)?;
-                let page = db.parse_page(&db_data, table_root_page)?;
+                let page = db.parse_page(db_data, table_root_page)?;
 
                 if select.columns.len() == 1 && matches!(select.columns[0], Column::Count) {
                     Ok(vec![vec![page.records.len().to_string()]])
