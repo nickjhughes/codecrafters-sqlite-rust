@@ -52,7 +52,6 @@ impl Page {
     pub fn parse(input: &[u8], is_first_page: bool) -> IResult<&[u8], Self> {
         let (input, page_type) = u8(input)?;
         let page_type = PageType::try_from(page_type).expect("invalid page type");
-        // dbg!(&page_type);
 
         let (input, records) = match &page_type {
             PageType::BTree(b_tree_page_type) => {
@@ -95,9 +94,22 @@ impl Page {
                     + cell_count as usize * 2;
                 let (input, _) = take(cell_content_offset - bytes_read)(input)?;
 
-                // Read cells
-                let (input, records) = count(Record::parse, cell_count as usize)(input)?;
-                // dbg!(&records);
+                // Read records
+                let column_names = if is_first_page {
+                    vec![
+                        "type".to_string(),
+                        "name".to_string(),
+                        "tbl_name".to_string(),
+                        "rootpage".to_string(),
+                        "sql".to_string(),
+                    ]
+                } else {
+                    todo!()
+                };
+                let (input, records) = count(
+                    |input| Record::parse(input, &column_names),
+                    cell_count as usize,
+                )(input)?;
 
                 (input, records)
             }

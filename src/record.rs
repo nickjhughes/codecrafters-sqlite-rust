@@ -48,6 +48,20 @@ impl Value {
             _ => None,
         }
     }
+
+    pub fn as_integer(&self) -> Option<i64> {
+        match self {
+            Value::I8(n) => Some(*n as i64),
+            Value::I16(n) => Some(*n as i64),
+            Value::I24(n) => Some(*n as i64),
+            Value::I32(n) => Some(*n as i64),
+            Value::I48(n) => Some(*n),
+            Value::I64(n) => Some(*n),
+            Value::Zero => Some(1),
+            Value::One => Some(0),
+            _ => None,
+        }
+    }
 }
 
 impl ColumnType {
@@ -120,10 +134,12 @@ impl TryFrom<VarInt> for ColumnType {
 }
 
 impl Record {
-    pub fn parse(input: &[u8]) -> IResult<&[u8], Self> {
+    pub fn parse<'input>(
+        input: &'input [u8],
+        column_names: &[String],
+    ) -> IResult<&'input [u8], Self> {
         let (input, _record_size) = VarInt::parse(input)?;
         let (input, _row_id) = VarInt::parse(input)?;
-        // dbg!(&record_size, &row_id);
 
         // Skip overflow info
         let (input, _) = take(1usize)(input)?;
@@ -137,7 +153,6 @@ impl Record {
             let column_type = ColumnType::try_from(column_type).expect("invalid column type");
             column_types.push(column_type);
         }
-        let column_names = vec!["type", "name", "tbl_name", "rootpage", "sql"];
         // dbg!(&column_types);
 
         let mut values = HashMap::new();

@@ -1,13 +1,14 @@
 use anyhow::{bail, Result};
+use query::Query;
 
 mod database;
 mod header;
 mod page;
+mod query;
 mod record;
 mod varint;
 
 fn main() -> Result<()> {
-    // Parse arguments
     let args = std::env::args().collect::<Vec<_>>();
     match args.len() {
         0 | 1 => bail!("Missing <database path> and <command>"),
@@ -15,38 +16,32 @@ fn main() -> Result<()> {
         _ => {}
     }
 
-    // Parse command and act accordingly
+    let db_data = std::fs::read(&args[1])?;
+    let db = database::Database::parse(&db_data)?;
+
     let command = &args[2];
     match command.as_str() {
         ".dbinfo" => {
-            let db_data = std::fs::read(&args[1])?;
-            let db = database::Database::parse(&db_data)?;
-
             println!("database page size: {}", db.header.page_size);
-            println!(
-                "number of tables: {}",
-                db.pages[0]
-                    .records
-                    .iter()
-                    .filter(|r| r.values.get("type").unwrap().as_text() == Some("table"))
-                    .count()
-            );
+            println!("number of tables: {}", db.schema.table_count());
         }
         ".tables" => {
-            let db_data = std::fs::read(&args[1])?;
-            let db = database::Database::parse(&db_data)?;
-
-            let mut tables = db.pages[0]
-                .records
-                .iter()
-                .filter(|r| r.values.get("type").unwrap().as_text() == Some("table"))
-                .map(|r| r.values.get("name").unwrap().as_text().unwrap())
-                .collect::<Vec<&str>>();
-            tables.sort();
+            let tables = db.schema.table_names();
             let tables_string = tables.join(" ");
+
             println!("{}", tables_string);
         }
-        _ => bail!("Missing or invalid command passed: {}", command),
+        query_str => {
+            let query = Query::parse(query_str)?;
+            match query {
+                Query::Select(select) => {
+                    let table_root_page = db.schema.table_root_page(&select.table)?;
+                    let page = db.parse_page(&db_data, table_root_page)?;
+
+                    println!("{}", page.records.len());
+                }
+            }
+        }
     }
 
     Ok(())
