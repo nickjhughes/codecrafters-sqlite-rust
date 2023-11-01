@@ -36,14 +36,15 @@ fn main() -> Result<()> {
             let db_data = std::fs::read(&args[1])?;
             let db = database::Database::parse(&db_data)?;
 
-            let tables = db.pages[0]
+            let mut tables = db.pages[0]
                 .records
                 .iter()
                 .filter(|r| r.values.get("type").unwrap().as_text() == Some("table"))
                 .map(|r| r.values.get("name").unwrap().as_text().unwrap())
-                .collect::<Vec<&str>>()
-                .join(" ");
-            println!("{}", tables);
+                .collect::<Vec<&str>>();
+            tables.sort();
+            let tables_string = tables.join(" ");
+            println!("{}", tables_string);
         }
         _ => bail!("Missing or invalid command passed: {}", command),
     }
