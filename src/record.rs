@@ -1,10 +1,11 @@
 use nom::{bytes::complete::take, number::complete::i8, IResult};
+use std::collections::HashMap;
 
 use crate::varint::VarInt;
 
 #[derive(Debug)]
 pub struct Record {
-    pub values: Vec<Value>,
+    pub values: HashMap<String, Value>,
 }
 
 #[derive(Debug)]
@@ -38,6 +39,15 @@ pub enum Value {
     One,
     Blob(String),
     Text(String),
+}
+
+impl Value {
+    pub fn as_text(&self) -> Option<&str> {
+        match self {
+            Value::Text(s) => Some(s),
+            _ => None,
+        }
+    }
 }
 
 impl ColumnType {
@@ -127,16 +137,19 @@ impl Record {
             let column_type = ColumnType::try_from(column_type).expect("invalid column type");
             column_types.push(column_type);
         }
+        let column_names = vec!["type", "name", "tbl_name", "rootpage", "sql"];
         // dbg!(&column_types);
 
-        let mut values = Vec::new();
-        for column_type in column_types.iter() {
+        let mut values = HashMap::new();
+        for (column_name, column_type) in column_names.iter().zip(column_types.iter()) {
             match column_type {
-                ColumnType::Null => values.push(Value::Null),
+                ColumnType::Null => {
+                    values.insert(column_name.to_string(), Value::Null);
+                }
                 ColumnType::I8 => {
                     let (remainder, value) = i8(rest)?;
                     rest = remainder;
-                    values.push(Value::I8(value));
+                    values.insert(column_name.to_string(), Value::I8(value));
                 }
                 ColumnType::I16 => todo!(),
                 ColumnType::I24 => todo!(),
@@ -144,25 +157,35 @@ impl Record {
                 ColumnType::I48 => todo!(),
                 ColumnType::I64 => todo!(),
                 ColumnType::F64 => todo!(),
-                ColumnType::Zero => values.push(Value::Zero),
-                ColumnType::One => values.push(Value::One),
+                ColumnType::Zero => {
+                    values.insert(column_name.to_string(), Value::Zero);
+                }
+                ColumnType::One => {
+                    values.insert(column_name.to_string(), Value::One);
+                }
                 ColumnType::Blob(size) => {
                     let (remainder, bytes) = take(*size)(rest)?;
                     rest = remainder;
-                    values.push(Value::Blob(
-                        std::str::from_utf8(bytes)
-                            .expect("non utf-8 text")
-                            .to_owned(),
-                    ));
+                    values.insert(
+                        column_name.to_string(),
+                        Value::Blob(
+                            std::str::from_utf8(bytes)
+                                .expect("non utf-8 text")
+                                .to_owned(),
+                        ),
+                    );
                 }
                 ColumnType::Text(size) => {
                     let (remainder, bytes) = take(*size)(rest)?;
                     rest = remainder;
-                    values.push(Value::Text(
-                        std::str::from_utf8(bytes)
-                            .expect("non utf-8 text")
-                            .to_owned(),
-                    ));
+                    values.insert(
+                        column_name.to_string(),
+                        Value::Text(
+                            std::str::from_utf8(bytes)
+                                .expect("non utf-8 text")
+                                .to_owned(),
+                        ),
+                    );
                 }
             }
         }

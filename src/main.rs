@@ -23,7 +23,27 @@ fn main() -> Result<()> {
             let db = database::Database::parse(&db_data)?;
 
             println!("database page size: {}", db.header.page_size);
-            println!("number of tables: {}", db.pages[0].records.len());
+            println!(
+                "number of tables: {}",
+                db.pages[0]
+                    .records
+                    .iter()
+                    .filter(|r| r.values.get("type").unwrap().as_text() == Some("table"))
+                    .count()
+            );
+        }
+        ".tables" => {
+            let db_data = std::fs::read(&args[1])?;
+            let db = database::Database::parse(&db_data)?;
+
+            let tables = db.pages[0]
+                .records
+                .iter()
+                .filter(|r| r.values.get("type").unwrap().as_text() == Some("table"))
+                .map(|r| r.values.get("name").unwrap().as_text().unwrap())
+                .collect::<Vec<&str>>()
+                .join(" ");
+            println!("{}", tables);
         }
         _ => bail!("Missing or invalid command passed: {}", command),
     }
