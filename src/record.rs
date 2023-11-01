@@ -144,10 +144,9 @@ impl Record {
         // Skip overflow info
         let (input, _) = take(1usize)(input)?;
 
-        // `sqlite_schema` table has 5 columns
         let mut rest = input;
         let mut column_types = Vec::new();
-        for _ in 0..5 {
+        for _ in 0..column_names.len() {
             let (remainder, column_type) = VarInt::parse(rest)?;
             rest = remainder;
             let column_type = ColumnType::try_from(column_type).expect("invalid column type");

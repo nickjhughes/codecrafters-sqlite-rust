@@ -35,11 +35,12 @@ fn main() -> Result<()> {
             let query = Query::parse(query_str)?;
             match query {
                 Query::Select(select) => {
-                    let table_root_page = db.schema.table_root_page(&select.table)?;
+                    let table_root_page = db.schema.table_root_page(&select.table_name)?;
                     let page = db.parse_page(&db_data, table_root_page)?;
 
                     println!("{}", page.records.len());
                 }
+                _ => todo!(),
             }
         }
     }
