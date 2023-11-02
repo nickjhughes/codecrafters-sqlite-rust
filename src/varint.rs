@@ -7,7 +7,7 @@ impl VarInt {
     pub fn parse(input: &[u8]) -> IResult<&[u8], Self> {
         let mut i = 0;
         let mut value: i64 = (input[i] as i64) & 0x7f;
-        while high_bit(input[i]) {
+        while high_bit(input[i]) && i < 8 {
             i += 1;
             value = (value << 7) | ((input[i] as i64) & 0x7f);
         }
@@ -63,5 +63,21 @@ mod tests {
         let (rest, value) = VarInt::parse(input).unwrap();
         assert!(rest.is_empty());
         assert_eq!(value, VarInt(170307943));
+    }
+
+    #[test]
+    fn nine_bytes() {
+        let input = &[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff];
+        let (rest, value) = VarInt::parse(input).unwrap();
+        assert!(rest.is_empty());
+        assert_eq!(value, VarInt(9223372036854775807));
+    }
+
+    #[test]
+    fn ten_bytes() {
+        let input = &[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xab];
+        let (rest, value) = VarInt::parse(input).unwrap();
+        assert!(rest.len() == 1 && rest[0] == 0xab);
+        assert_eq!(value, VarInt(9223372036854775807));
     }
 }
