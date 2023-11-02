@@ -1,7 +1,7 @@
 use nom::{bytes::complete::take, number::complete::i8, IResult};
 use std::collections::HashMap;
 
-use crate::varint::VarInt;
+use crate::varint::varint;
 
 #[derive(Debug)]
 pub struct Record {
@@ -123,11 +123,11 @@ impl ColumnType {
     }
 }
 
-impl TryFrom<VarInt> for ColumnType {
+impl TryFrom<i64> for ColumnType {
     type Error = anyhow::Error;
 
-    fn try_from(value: VarInt) -> Result<Self, Self::Error> {
-        match value.0 {
+    fn try_from(value: i64) -> Result<Self, Self::Error> {
+        match value {
             0 => Ok(ColumnType::Null),
             1 => Ok(ColumnType::I8),
             2 => Ok(ColumnType::I16),
@@ -155,20 +155,24 @@ impl Record {
         input: &'input [u8],
         column_names: &[String],
     ) -> IResult<&'input [u8], Self> {
-        let (input, _record_size) = VarInt::parse(input)?;
-        let (input, _row_id) = VarInt::parse(input)?;
+        let (input, _record_size) = varint(input)?;
+        let (input, _row_id) = varint(input)?;
 
-        // Skip overflow info
-        let (input, _) = take(1usize)(input)?;
+        let mut header_bytes_read = 0;
+        let before_input_len = input.len();
+        let (input, header_size) = varint(input)?;
+        header_bytes_read += before_input_len - input.len();
 
         let mut rest = input;
         let mut column_types = Vec::new();
         for _ in 0..column_names.len() {
-            let (remainder, column_type) = VarInt::parse(rest)?;
+            let (remainder, column_type) = varint(rest)?;
+            header_bytes_read += rest.len() - remainder.len();
             rest = remainder;
             let column_type = ColumnType::try_from(column_type).expect("invalid column type");
             column_types.push(column_type);
         }
+        assert_eq!(header_bytes_read, header_size as usize);
         // dbg!(&column_types);
 
         let mut values = HashMap::new();

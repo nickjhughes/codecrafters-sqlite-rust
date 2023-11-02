@@ -5,7 +5,7 @@ use nom::{
     IResult,
 };
 
-use super::{record::Record, varint::VarInt};
+use super::{record::Record, varint::varint};
 
 pub struct Page {
     pub ty: PageType,
@@ -99,7 +99,7 @@ impl Page {
                 };
 
                 // Cell pointer array
-                let (input, _cell_pointers) = count(be_u16, cell_count as usize)(input)?;
+                let (input, cell_pointers) = count(be_u16, cell_count as usize)(input)?;
 
                 // Skip over unallocated space
                 let bytes_read = if is_first_page { 100 } else { 0 }
@@ -114,15 +114,16 @@ impl Page {
                     + cell_count as usize * 2;
                 let (input, _) = take(cell_content_offset - bytes_read)(input)?;
 
-                eprintln!("Read page header");
-                dbg!(
-                    _first_freelock,
-                    cell_count,
-                    cell_content_offset,
-                    _num_fragmented_free_bytes,
-                    _rightmost_pointer,
-                    _cell_pointers
-                );
+                // dbg!(
+                //     _first_freelock,
+                //     cell_count,
+                //     cell_content_offset,
+                //     _num_fragmented_free_bytes,
+                //     _rightmost_pointer,
+                //     cell_pointers
+                // );
+
+                // TODO: Should actually read each cell following `cell_pointers`, not consecutively
 
                 // Read cells
                 let (input, records) = count(
@@ -151,10 +152,13 @@ pub struct Cell {}
 impl Cell {
     pub fn parse(input: &[u8], ty: BTreePageType, usable_page_size: usize) -> IResult<&[u8], Self> {
         match ty {
-            BTreePageType::TableInterior => todo!(),
+            BTreePageType::TableInterior => {
+                let (input, left_child_pointer) = be_u32(input)?;
+                let (input, key) = varint(input)?;
+            }
             BTreePageType::TableLeaf => {
-                let (input, payload_size) = VarInt::parse(input)?;
-                let payload_size = payload_size.0 as usize;
+                let (input, payload_size) = varint(input)?;
+                let payload_size = payload_size as usize;
 
                 let maximum_non_overflow_payload_size = usable_page_size - 35;
                 if payload_size <= maximum_non_overflow_payload_size {
@@ -179,7 +183,9 @@ impl Cell {
                     }
                 }
 
-                let (input, row_id) = VarInt::parse(input)?;
+                // Record::parse(input, column_names);
+
+                // let (input, row_id) = VarInt::parse(input)?;
             }
             BTreePageType::IndexInterior => todo!(),
             BTreePageType::IndexLeaf => todo!(),
