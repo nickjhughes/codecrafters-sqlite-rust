@@ -24,7 +24,18 @@ impl VarInt {
         let value = match byte_count {
             1 => VarInt::I8((bytes[0] & 0x7f) as i8),
             2 => VarInt::I16((((bytes[0] & 0x7f) as i16) << 7) | (bytes[1] & 0x7f) as i16),
-            3..=9 => todo!("3+ byte varint"),
+            3 => VarInt::I32(
+                (((bytes[0] & 0x7f) as i32) << 14)
+                    | (((bytes[1] & 0x7f) as i32) << 7)
+                    | ((bytes[2] & 0x7f) as i32),
+            ),
+            4 => VarInt::I32(
+                (((bytes[0] & 0x7f) as i32) << 21)
+                    | (((bytes[1] & 0x7f) as i32) << 14)
+                    | (((bytes[2] & 0x7f) as i32) << 7)
+                    | ((bytes[3] & 0x7f) as i32),
+            ),
+            5..=9 => todo!("5+ byte varint"),
             _ => unreachable!(),
         };
 
