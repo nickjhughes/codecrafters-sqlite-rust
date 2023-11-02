@@ -34,6 +34,32 @@ pub enum Value {
     Blob(String),
 }
 
+impl PartialEq for Value {
+    fn eq(&self, other: &Self) -> bool {
+        match self {
+            Value::Null => false,
+            Value::Integer(n1) => match other {
+                Value::Integer(n2) => n1 == n2,
+                _ => false,
+            },
+            Value::Real(f1) => match other {
+                Value::Real(f2) => f1 == f2,
+                _ => false,
+            },
+            Value::Text(s1) => match other {
+                Value::Text(s2) => s1 == s2,
+                Value::Blob(s2) => s1 == s2,
+                _ => false,
+            },
+            Value::Blob(s1) => match other {
+                Value::Text(s2) => s1 == s2,
+                Value::Blob(s2) => s1 == s2,
+                _ => false,
+            },
+        }
+    }
+}
+
 impl Value {
     pub fn as_integer(&self) -> Option<i64> {
         match self {

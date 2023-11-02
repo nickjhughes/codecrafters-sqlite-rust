@@ -1,4 +1,4 @@
-use crate::database::Database;
+use crate::{database::Database, record::Value};
 
 #[derive(Debug)]
 pub enum Query {
@@ -10,12 +10,19 @@ pub enum Query {
 pub struct SelectQuery {
     pub table_name: String,
     pub columns: Vec<Column>,
+    pub filters: Vec<Filter>,
 }
 
 #[derive(Debug)]
 pub enum Column {
     Count,
     ColumnName(String),
+}
+
+#[derive(Debug)]
+pub struct Filter {
+    pub column_name: String,
+    pub column_value: Value,
 }
 
 impl Column {
@@ -55,9 +62,30 @@ impl Query {
 
             let table_name = parts.next().unwrap().to_ascii_lowercase();
 
+            let mut filters = Vec::new();
+            if parts.next().map(|s| s.to_ascii_lowercase()) == Some("where".into()) {
+                let column_name = parts.next().unwrap().to_ascii_lowercase();
+                assert_eq!(parts.next(), Some("="));
+                let column_value = {
+                    let value = parts.next().unwrap();
+                    if value.starts_with("'") {
+                        // Interpret as text
+                        Value::Text(value.trim_matches('\'').to_owned())
+                    } else {
+                        // Interpret as number
+                        todo!()
+                    }
+                };
+                filters.push(Filter {
+                    column_name,
+                    column_value,
+                });
+            }
+
             Ok(Query::Select(SelectQuery {
                 table_name,
                 columns,
+                filters,
             }))
         } else if query_str.to_ascii_lowercase().starts_with("create") {
             let (_, columns_info) = query_str.split_once('(').unwrap();
@@ -94,6 +122,21 @@ impl Query {
                 } else {
                     let mut results = Vec::new();
                     for record in page.records.iter() {
+                        let mut filtered_out = false;
+                        for filter in select.filters.iter() {
+                            let value = record
+                                .values
+                                .get(&filter.column_name)
+                                .expect("invalid column name");
+                            if *value != filter.column_value {
+                                filtered_out = true;
+                                break;
+                            }
+                        }
+                        if filtered_out {
+                            continue;
+                        }
+
                         let mut row = Vec::new();
                         for column in select.columns.iter() {
                             let column_name = column.as_name().unwrap();
