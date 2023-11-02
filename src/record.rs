@@ -28,20 +28,28 @@ pub enum ColumnType {
 #[derive(Debug)]
 pub enum Value {
     Null,
-    I8(i8),
-    I16(i16),
-    I24(i32),
-    I32(i32),
-    I48(i64),
-    I64(i64),
-    F64(f64),
-    Zero,
-    One,
-    Blob(String),
+    Integer(i64),
+    Real(f64),
     Text(String),
+    Blob(String),
 }
 
 impl Value {
+    pub fn as_integer(&self) -> Option<i64> {
+        match self {
+            Value::Integer(n) => Some(*n),
+            _ => None,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn as_real(&self) -> Option<f64> {
+        match self {
+            Value::Real(f) => Some(*f),
+            _ => None,
+        }
+    }
+
     pub fn as_text(&self) -> Option<&str> {
         match self {
             Value::Text(s) => Some(s),
@@ -49,16 +57,10 @@ impl Value {
         }
     }
 
-    pub fn as_integer(&self) -> Option<i64> {
+    #[allow(dead_code)]
+    pub fn as_blob(&self) -> Option<&str> {
         match self {
-            Value::I8(n) => Some(*n as i64),
-            Value::I16(n) => Some(*n as i64),
-            Value::I24(n) => Some(*n as i64),
-            Value::I32(n) => Some(*n as i64),
-            Value::I48(n) => Some(*n),
-            Value::I64(n) => Some(*n),
-            Value::Zero => Some(1),
-            Value::One => Some(0),
+            Value::Blob(s) => Some(s),
             _ => None,
         }
     }
@@ -68,15 +70,8 @@ impl ToString for Value {
     fn to_string(&self) -> String {
         match self {
             Value::Null => "null".into(),
-            Value::I8(n) => n.to_string(),
-            Value::I16(n) => n.to_string(),
-            Value::I24(n) => n.to_string(),
-            Value::I32(n) => n.to_string(),
-            Value::I48(n) => n.to_string(),
-            Value::I64(n) => n.to_string(),
-            Value::F64(n) => n.to_string(),
-            Value::Zero => 1.to_string(),
-            Value::One => 0.to_string(),
+            Value::Integer(n) => n.to_string(),
+            Value::Real(f) => f.to_string(),
             Value::Blob(s) => s.to_owned(),
             Value::Text(s) => s.to_owned(),
         }
@@ -182,7 +177,7 @@ impl Record {
                 ColumnType::I8 => {
                     let (remainder, value) = i8(rest)?;
                     rest = remainder;
-                    values.insert(column_name.to_string(), Value::I8(value));
+                    values.insert(column_name.to_string(), Value::Integer(value as i64));
                 }
                 ColumnType::I16 => todo!(),
                 ColumnType::I24 => todo!(),
@@ -191,10 +186,10 @@ impl Record {
                 ColumnType::I64 => todo!(),
                 ColumnType::F64 => todo!(),
                 ColumnType::Zero => {
-                    values.insert(column_name.to_string(), Value::Zero);
+                    values.insert(column_name.to_string(), Value::Integer(0i64));
                 }
                 ColumnType::One => {
-                    values.insert(column_name.to_string(), Value::One);
+                    values.insert(column_name.to_string(), Value::Integer(0i64));
                 }
                 ColumnType::Blob(size) => {
                     let (remainder, bytes) = take(*size)(rest)?;
