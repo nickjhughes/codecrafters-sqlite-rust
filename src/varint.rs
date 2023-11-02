@@ -1,63 +1,44 @@
 use nom::IResult;
 
-#[allow(dead_code)]
 #[derive(Debug, PartialEq)]
-pub enum VarInt {
-    I8(i8),
-    I16(i16),
-    I32(i32),
-    I64(i64),
-}
+pub struct VarInt(pub i64);
 
 impl VarInt {
     pub fn parse(input: &[u8]) -> IResult<&[u8], Self> {
-        let mut bytes = [0u8; 9];
-        bytes[0] = input[0];
-        let mut input = &input[1..];
-        let mut byte_count = 1;
-        while byte_count < 9 && high_bit(bytes[byte_count - 1]) {
-            bytes[byte_count] = input[0];
-            input = &input[1..];
-            byte_count += 1;
+        let mut i = 0;
+        let mut value: i64 = (input[i] as i64) & 0x7f;
+        while high_bit(input[i]) {
+            i += 1;
+            value = (value << 7) | ((input[i] as i64) & 0x7f);
         }
-
-        let value = match byte_count {
-            1 => VarInt::I8((bytes[0] & 0x7f) as i8),
-            2 => VarInt::I16((((bytes[0] & 0x7f) as i16) << 7) | (bytes[1] & 0x7f) as i16),
-            3 => VarInt::I32(
-                (((bytes[0] & 0x7f) as i32) << 14)
-                    | (((bytes[1] & 0x7f) as i32) << 7)
-                    | ((bytes[2] & 0x7f) as i32),
-            ),
-            4 => VarInt::I32(
-                (((bytes[0] & 0x7f) as i32) << 21)
-                    | (((bytes[1] & 0x7f) as i32) << 14)
-                    | (((bytes[2] & 0x7f) as i32) << 7)
-                    | ((bytes[3] & 0x7f) as i32),
-            ),
-            5..=9 => todo!("5+ byte varint"),
-            _ => unreachable!(),
-        };
-
-        Ok((input, value))
+        Ok((&input[i + 1..], VarInt(value)))
     }
 }
 
 /// Is the high bit of this byte set?
 fn high_bit(byte: u8) -> bool {
-    (byte & 0xF0) >> 7 == 1
+    (byte & 0xf0) >> 7 == 1
 }
 
 #[cfg(test)]
 mod tests {
-    use super::VarInt;
+    use super::{high_bit, VarInt};
+
+    #[test]
+    fn test_high_bit() {
+        assert!(high_bit(0b10000000));
+        assert!(high_bit(0b10111010));
+
+        assert!(!high_bit(0b00000000));
+        assert!(!high_bit(0b01111111));
+    }
 
     #[test]
     fn one_byte() {
         let input = &[0x15];
         let (rest, value) = VarInt::parse(input).unwrap();
         assert!(rest.is_empty());
-        assert_eq!(value, VarInt::I8(0x15));
+        assert_eq!(value, VarInt(0x15));
     }
 
     #[test]
@@ -65,6 +46,22 @@ mod tests {
         let input = &[0x87, 0x68];
         let (rest, value) = VarInt::parse(input).unwrap();
         assert!(rest.is_empty());
-        assert_eq!(value, VarInt::I16(1000));
+        assert_eq!(value, VarInt(1000));
+    }
+
+    #[test]
+    fn three_bytes() {
+        let input = &[0xc8, 0xf2, 0x19];
+        let (rest, value) = VarInt::parse(input).unwrap();
+        assert!(rest.is_empty());
+        assert_eq!(value, VarInt(1194265));
+    }
+
+    #[test]
+    fn four_bytes() {
+        let input = &[0xd1, 0x9a, 0xe2, 0x67];
+        let (rest, value) = VarInt::parse(input).unwrap();
+        assert!(rest.is_empty());
+        assert_eq!(value, VarInt(170307943));
     }
 }

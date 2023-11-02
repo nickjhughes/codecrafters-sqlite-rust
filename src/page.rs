@@ -5,7 +5,7 @@ use nom::{
     IResult,
 };
 
-use super::record::Record;
+use super::{record::Record, varint::VarInt};
 
 pub struct Page {
     pub ty: PageType,
@@ -48,14 +48,30 @@ pub enum BTreePageType {
     IndexLeaf,
 }
 
+impl TryFrom<u8> for PageType {
+    type Error = anyhow::Error;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0x02 => Ok(PageType::BTree(BTreePageType::IndexInterior)),
+            0x05 => Ok(PageType::BTree(BTreePageType::TableInterior)),
+            0x0a => Ok(PageType::BTree(BTreePageType::IndexLeaf)),
+            0x0d => Ok(PageType::BTree(BTreePageType::TableLeaf)),
+            _ => Err(anyhow::format_err!("unknown page type {}", value)),
+        }
+    }
+}
+
 impl Page {
     pub fn parse<'input>(
         input: &'input [u8],
         is_first_page: bool,
         column_names: &[String],
+        usable_page_size: usize,
     ) -> IResult<&'input [u8], Self> {
         let (input, page_type) = u8(input)?;
         let page_type = PageType::try_from(page_type).expect("invalid page type");
+        dbg!(&page_type);
 
         let (input, records) = match &page_type {
             PageType::BTree(b_tree_page_type) => {
@@ -98,7 +114,17 @@ impl Page {
                     + cell_count as usize * 2;
                 let (input, _) = take(cell_content_offset - bytes_read)(input)?;
 
-                // Read records
+                eprintln!("Read page header");
+                dbg!(
+                    _first_freelock,
+                    cell_count,
+                    cell_content_offset,
+                    _num_fragmented_free_bytes,
+                    _rightmost_pointer,
+                    _cell_pointers
+                );
+
+                // Read cells
                 let (input, records) = count(
                     |input| Record::parse(input, column_names),
                     cell_count as usize,
@@ -119,16 +145,46 @@ impl Page {
     }
 }
 
-impl TryFrom<u8> for PageType {
-    type Error = anyhow::Error;
+#[derive(Debug)]
+pub struct Cell {}
 
-    fn try_from(value: u8) -> Result<Self, Self::Error> {
-        match value {
-            2 => Ok(PageType::BTree(BTreePageType::IndexInterior)),
-            5 => Ok(PageType::BTree(BTreePageType::TableInterior)),
-            10 => Ok(PageType::BTree(BTreePageType::IndexLeaf)),
-            13 => Ok(PageType::BTree(BTreePageType::TableLeaf)),
-            _ => Err(anyhow::format_err!("unknown page type {}", value)),
-        }
+impl Cell {
+    pub fn parse(input: &[u8], ty: BTreePageType, usable_page_size: usize) -> IResult<&[u8], Self> {
+        match ty {
+            BTreePageType::TableInterior => todo!(),
+            BTreePageType::TableLeaf => {
+                let (input, payload_size) = VarInt::parse(input)?;
+                let payload_size = payload_size.0 as usize;
+
+                let maximum_non_overflow_payload_size = usable_page_size - 35;
+                if payload_size <= maximum_non_overflow_payload_size {
+                    // The entire payload is stored on the b-tree leaf page
+                    println!("No overflow");
+                } else {
+                    let minimum_before_overflow = ((usable_page_size - 12) * 32 / 255) - 23;
+                    let k = minimum_before_overflow
+                        + ((payload_size - minimum_before_overflow) % (usable_page_size - 4));
+                    if payload_size > k && k <= maximum_non_overflow_payload_size {
+                        // The first `k` bytes of the payload are stored on the btree page,
+                        // and the remaining `payload_size - k` bytes are stored on overflow pages.
+                        println!("Overflow of size {}", payload_size - k);
+                    } else {
+                        // The first `minimum_before_overflow` bytes of the payload are stored on the
+                        // btree page and the remaining `payload_size - minimum_before_overflow` bytes
+                        // are stored on overflow pages.
+                        println!(
+                            "Overflow of size {}",
+                            payload_size - minimum_before_overflow
+                        );
+                    }
+                }
+
+                let (input, row_id) = VarInt::parse(input)?;
+            }
+            BTreePageType::IndexInterior => todo!(),
+            BTreePageType::IndexLeaf => todo!(),
+        };
+
+        todo!()
     }
 }

@@ -37,10 +37,12 @@ pub struct TableSchema {
 }
 
 impl Database {
+    /// Parse the first page of the database file, containing the header and a schema.
     pub fn parse(input: &[u8]) -> anyhow::Result<Self> {
         let (rest, header) = Header::parse(input).expect("failed to parse header");
+        let first_page_data = &rest[0..(header.page_size as usize - 100)];
         let (_, first_page) = Page::parse(
-            rest,
+            first_page_data,
             true,
             &[
                 "type".to_string(),
@@ -49,6 +51,7 @@ impl Database {
                 "rootpage".to_string(),
                 "sql".to_string(),
             ],
+            header.page_size as usize - header.end_page_reserved_bytes as usize,
         )
         .expect("failed to parse first page");
 
@@ -113,9 +116,14 @@ impl Database {
         let page_input = &input[self.header.page_size as usize * (page_index - 1)
             ..self.header.page_size as usize * (page_index - 1) + self.header.page_size as usize];
 
-        Ok(Page::parse(page_input, false, &column_names)
-            .expect("failed to parse page")
-            .1)
+        Ok(Page::parse(
+            page_input,
+            false,
+            &column_names,
+            self.header.page_size as usize - self.header.end_page_reserved_bytes as usize,
+        )
+        .expect("failed to parse page")
+        .1)
     }
 }
 

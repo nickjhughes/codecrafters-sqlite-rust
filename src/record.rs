@@ -127,46 +127,23 @@ impl TryFrom<VarInt> for ColumnType {
     type Error = anyhow::Error;
 
     fn try_from(value: VarInt) -> Result<Self, Self::Error> {
-        match value {
-            VarInt::I8(v) => match v {
-                0 => Ok(ColumnType::Null),
-                1 => Ok(ColumnType::I8),
-                2 => Ok(ColumnType::I16),
-                3 => Ok(ColumnType::I24),
-                4 => Ok(ColumnType::I32),
-                5 => Ok(ColumnType::I48),
-                6 => Ok(ColumnType::I64),
-                7 => Ok(ColumnType::F64),
-                8 => Ok(ColumnType::Zero),
-                9 => Ok(ColumnType::One),
-                10 | 11 => Err(anyhow::format_err!("invalid column type")),
-                _ => {
-                    if v % 2 == 0 {
-                        Ok(ColumnType::Blob(((v - 12) / 2) as usize))
-                    } else {
-                        Ok(ColumnType::Text(((v - 13) / 2) as usize))
-                    }
-                }
-            },
-            VarInt::I16(v) => {
-                if v % 2 == 0 {
-                    Ok(ColumnType::Blob(((v - 12) / 2) as usize))
+        match value.0 {
+            0 => Ok(ColumnType::Null),
+            1 => Ok(ColumnType::I8),
+            2 => Ok(ColumnType::I16),
+            3 => Ok(ColumnType::I24),
+            4 => Ok(ColumnType::I32),
+            5 => Ok(ColumnType::I48),
+            6 => Ok(ColumnType::I64),
+            7 => Ok(ColumnType::F64),
+            8 => Ok(ColumnType::Zero),
+            9 => Ok(ColumnType::One),
+            10 | 11 => Err(anyhow::format_err!("invalid column type")),
+            value => {
+                if value % 2 == 0 {
+                    Ok(ColumnType::Blob(((value - 12) / 2) as usize))
                 } else {
-                    Ok(ColumnType::Text(((v - 13) / 2) as usize))
-                }
-            }
-            VarInt::I32(v) => {
-                if v % 2 == 0 {
-                    Ok(ColumnType::Blob(((v - 12) / 2) as usize))
-                } else {
-                    Ok(ColumnType::Text(((v - 13) / 2) as usize))
-                }
-            }
-            VarInt::I64(v) => {
-                if v % 2 == 0 {
-                    Ok(ColumnType::Blob(((v - 12) / 2) as usize))
-                } else {
-                    Ok(ColumnType::Text(((v - 13) / 2) as usize))
+                    Ok(ColumnType::Text(((value - 13) / 2) as usize))
                 }
             }
         }
