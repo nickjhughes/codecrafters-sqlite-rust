@@ -1,14 +1,24 @@
 use nom::{number::complete::be_u32, IResult};
 
-use crate::{page::BTreePageType, record::Record, varint::varint};
+use crate::{
+    page::BTreePageType,
+    record::{Record, RecordType},
+    varint::varint,
+};
 
 #[allow(dead_code)]
 #[derive(Debug)]
 pub enum Cell {
     TableLeaf(Record),
-    TableInterior { left_child_pointer: u32, key: i64 },
-    IndexLeaf,
-    IndexInterior,
+    TableInterior {
+        left_child_pointer: u32,
+        key: i64,
+    },
+    IndexLeaf(Record),
+    IndexInterior {
+        left_child_pointer: u32,
+        record: Record,
+    },
 }
 
 impl Cell {
@@ -18,6 +28,43 @@ impl Cell {
         usable_page_size: usize,
         column_names: &[String],
     ) -> IResult<&'input [u8], Self> {
+        let (input, left_child_pointer) = if matches!(ty, BTreePageType::IndexInterior) {
+            let (input, left_child_pointer) = be_u32(input)?;
+            (input, Some(left_child_pointer))
+        } else {
+            (input, None)
+        };
+
+        // Check for overflow
+        let input = if matches!(
+            ty,
+            BTreePageType::TableLeaf | BTreePageType::IndexInterior | BTreePageType::IndexLeaf
+        ) {
+            let (input, payload_size) = varint(input)?;
+            let payload_size = payload_size as usize;
+
+            let x = match ty {
+                BTreePageType::TableLeaf => usable_page_size - 35,
+                _ => ((usable_page_size - 12) * 64 / 255) - 23,
+            };
+            let m = ((usable_page_size - 12) * 32 / 255) - 23;
+            let k = m + ((payload_size - m) % (usable_page_size - 4));
+
+            if payload_size > x {
+                // Overflow
+                let overflow_size = if k <= x {
+                    payload_size - k
+                } else {
+                    payload_size - m
+                };
+                todo!("overflow of size {:?}", overflow_size);
+            }
+
+            input
+        } else {
+            input
+        };
+
         match ty {
             BTreePageType::TableInterior => {
                 let (input, left_child_pointer) = be_u32(input)?;
@@ -31,39 +78,24 @@ impl Cell {
                 ))
             }
             BTreePageType::TableLeaf => {
-                let (input, payload_size) = varint(input)?;
-                let payload_size = payload_size as usize;
-
-                let maximum_non_overflow_payload_size = usable_page_size - 35;
-                if payload_size <= maximum_non_overflow_payload_size {
-                    // The entire payload is stored on the b-tree leaf page
-                } else {
-                    let minimum_before_overflow = ((usable_page_size - 12) * 32 / 255) - 23;
-                    let k = minimum_before_overflow
-                        + ((payload_size - minimum_before_overflow) % (usable_page_size - 4));
-                    if payload_size > k && k <= maximum_non_overflow_payload_size {
-                        // The first `k` bytes of the payload are stored on the btree page,
-                        // and the remaining `payload_size - k` bytes are stored on overflow pages.
-                        // println!("Overflow of size {}", payload_size - k);
-                        todo!("cell overflow");
-                    } else {
-                        // The first `minimum_before_overflow` bytes of the payload are stored on the
-                        // btree page and the remaining `payload_size - minimum_before_overflow` bytes
-                        // are stored on overflow pages.
-                        // println!(
-                        //     "Overflow of size {}",
-                        //     payload_size - minimum_before_overflow
-                        // );
-                        todo!("cell overflow");
-                    }
-                }
-
-                let (input, record) = Record::parse(input, column_names)?;
-
+                let (input, record) = Record::parse(input, column_names, RecordType::Table)?;
                 Ok((input, Cell::TableLeaf(record)))
             }
-            BTreePageType::IndexInterior => todo!(),
-            BTreePageType::IndexLeaf => todo!(),
+            BTreePageType::IndexInterior => {
+                let left_child_pointer = left_child_pointer.unwrap();
+                let (input, record) = Record::parse(input, column_names, RecordType::Index)?;
+                Ok((
+                    input,
+                    Cell::IndexInterior {
+                        left_child_pointer,
+                        record,
+                    },
+                ))
+            }
+            BTreePageType::IndexLeaf => {
+                let (input, record) = Record::parse(input, column_names, RecordType::Index)?;
+                Ok((input, Cell::IndexLeaf(record)))
+            }
         }
     }
 

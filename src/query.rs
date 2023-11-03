@@ -1,4 +1,7 @@
-use crate::{database::Database, record::Value};
+use crate::{
+    database::{Database, ObjectSchema},
+    record::Value,
+};
 
 #[derive(Debug)]
 pub enum Query {
@@ -53,7 +56,7 @@ impl Query {
             for next_token in parts.by_ref() {
                 if next_token == "," || next_token.to_ascii_lowercase() == "from" {
                     break;
-                } else if next_token.to_ascii_lowercase().contains("count") {
+                } else if next_token.to_ascii_lowercase().contains("count(") {
                     columns.push(Column::Count);
                 } else {
                     let column_name = next_token.trim_start_matches(',').trim_end_matches(',');
@@ -123,24 +126,59 @@ impl Query {
     pub fn execute(&self, db: &Database, db_data: &[u8]) -> anyhow::Result<Vec<Vec<String>>> {
         match self {
             Query::Select(select) => {
-                let table_root_page = db.schema.table_root_page(&select.table_name)?;
-                let records = db.get_full_table(db_data, table_root_page)?;
+                let mut need_to_filter = true;
+
+                let records = if let Some(filter) = select.filters.iter().next() {
+                    // See if we can use an index
+                    let mut index = None;
+                    for object in db.schema.objects.iter() {
+                        match object {
+                            ObjectSchema::Index(idx) => {
+                                if idx.column_name == filter.column_name {
+                                    index = Some(idx);
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    if let Some(index) = index {
+                        let row_ids = db.search_index(
+                            db_data,
+                            index.root_page,
+                            filter.column_name.clone(),
+                            filter.column_value.clone(),
+                        )?;
+                        need_to_filter = false;
+                        let table_root_page = db.schema.table_root_page(&select.table_name)?;
+                        db.get_by_row_ids(db_data, table_root_page, &row_ids)?
+                    } else {
+                        // Full table scan
+                        let table_root_page = db.schema.table_root_page(&select.table_name)?;
+                        db.get_full_table(db_data, table_root_page)?
+                    }
+                } else {
+                    // Full table scan
+                    let table_root_page = db.schema.table_root_page(&select.table_name)?;
+                    db.get_full_table(db_data, table_root_page)?
+                };
 
                 let mut results = Vec::new();
                 for record in records.iter() {
-                    let mut filtered_out = false;
-                    for filter in select.filters.iter() {
-                        let value = record
-                            .values
-                            .get(&filter.column_name)
-                            .expect("invalid column name");
-                        if *value != filter.column_value {
-                            filtered_out = true;
-                            break;
+                    if need_to_filter {
+                        let mut filtered_out = false;
+                        for filter in select.filters.iter() {
+                            let value = record
+                                .values
+                                .get(&filter.column_name)
+                                .expect("invalid column name");
+                            if *value != filter.column_value {
+                                filtered_out = true;
+                                break;
+                            }
                         }
-                    }
-                    if filtered_out {
-                        continue;
+                        if filtered_out {
+                            continue;
+                        }
                     }
 
                     let mut row = Vec::new();
@@ -166,7 +204,7 @@ impl Query {
 
                 Ok(results)
             }
-            _ => todo!(),
+            _ => todo!("non select query"),
         }
     }
 }

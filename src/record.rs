@@ -25,7 +25,7 @@ pub enum ColumnType {
 }
 
 #[allow(dead_code)]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Value {
     Null,
     Integer(i64),
@@ -150,12 +150,24 @@ impl TryFrom<i64> for ColumnType {
     }
 }
 
+#[derive(Debug, PartialEq)]
+pub enum RecordType {
+    Table,
+    Index,
+}
+
 impl Record {
     pub fn parse<'input>(
         input: &'input [u8],
         column_names: &[String],
+        record_type: RecordType,
     ) -> IResult<&'input [u8], Self> {
-        let (input, row_id) = varint(input)?;
+        let (input, row_id) = if record_type == RecordType::Table {
+            let (input, row_id) = varint(input)?;
+            (input, Some(row_id))
+        } else {
+            (input, None)
+        };
 
         let mut header_bytes_read = 0;
         let before_input_len = input.len();
@@ -177,10 +189,10 @@ impl Record {
         for (column_name, column_type) in column_names.iter().zip(column_types.iter()) {
             match column_type {
                 ColumnType::Null => {
-                    if column_name == "id" {
+                    if record_type == RecordType::Table && column_name == "id" {
                         // FIXME: This is only an alias for `rowid` when it has type
                         // "INTEGER PRIMARY KEY" - it's not based on the name
-                        values.insert(column_name.to_string(), Value::Integer(row_id));
+                        values.insert(column_name.to_string(), Value::Integer(row_id.unwrap()));
                     } else {
                         values.insert(column_name.to_string(), Value::Null);
                     }

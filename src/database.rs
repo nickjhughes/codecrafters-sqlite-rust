@@ -3,7 +3,7 @@ use crate::{
     header::{Header, HEADER_SIZE},
     page::Page,
     query::Query,
-    record::Record,
+    record::{Record, Value},
 };
 
 pub struct Database {
@@ -29,6 +29,13 @@ impl ObjectSchema {
     pub fn as_table(&self) -> Option<&TableSchema> {
         match self {
             ObjectSchema::Table(table) => Some(table),
+            _ => None,
+        }
+    }
+
+    pub fn as_index(&self) -> Option<&IndexSchema> {
+        match self {
+            ObjectSchema::Index(index) => Some(index),
             _ => None,
         }
     }
@@ -178,8 +185,134 @@ impl Database {
                     Cell::TableInterior {
                         left_child_pointer, ..
                     } => pages_to_read.push(left_child_pointer as usize),
-                    Cell::IndexLeaf => todo!(),
-                    Cell::IndexInterior => todo!(),
+                    _ => unreachable!(),
+                }
+            }
+        }
+
+        Ok(records)
+    }
+
+    pub fn search_index(
+        &self,
+        input: &[u8],
+        page_index: usize,
+        key_name: String,
+        key: Value,
+    ) -> anyhow::Result<Vec<i64>> {
+        assert!(page_index > 1);
+
+        let column_name = self
+            .schema
+            .objects
+            .iter()
+            .find(|o| {
+                matches!(o, ObjectSchema::Index(_)) && o.as_index().unwrap().root_page == page_index
+            })
+            .map(|o| o.as_index().unwrap().column_name.clone())
+            .unwrap();
+
+        let mut row_ids = Vec::new();
+        let mut pages_to_read: Vec<usize> = vec![page_index];
+        while let Some(page_index) = pages_to_read.pop() {
+            let page_input = &input[self.header.page_size * (page_index - 1)
+                ..self.header.page_size * (page_index - 1) + self.header.page_size];
+            let page = Page::parse(
+                page_input,
+                false,
+                &[column_name.clone(), "row_id".into()],
+                self.header.page_size - self.header.end_page_reserved_bytes,
+            )
+            .expect("failed to parse page")
+            .1;
+
+            // TODO: Only parse `rightmost_pointer` and `left_child_pointer` pages
+            //       if the entries we're interested in will appear there
+
+            if let Some(rightmost_pointer) = page.rightmost_pointer {
+                pages_to_read.push(rightmost_pointer);
+            }
+
+            for cell in page.cells {
+                match cell {
+                    Cell::IndexLeaf(record) => {
+                        if *record.values.get(&key_name).unwrap() == key {
+                            row_ids
+                                .push(record.values.get("row_id").unwrap().as_integer().unwrap());
+                        }
+                    }
+                    Cell::IndexInterior {
+                        left_child_pointer,
+                        record,
+                    } => {
+                        pages_to_read.push(left_child_pointer as usize);
+                        if *record.values.get(&key_name).unwrap() == key {
+                            row_ids
+                                .push(record.values.get("row_id").unwrap().as_integer().unwrap());
+                        }
+                    }
+                    _ => unreachable!(),
+                }
+            }
+        }
+
+        Ok(row_ids)
+    }
+
+    pub fn get_by_row_ids(
+        &self,
+        input: &[u8],
+        page_index: usize,
+        row_ids: &[i64],
+    ) -> anyhow::Result<Vec<Record>> {
+        assert!(page_index > 1);
+
+        let column_names = self
+            .schema
+            .objects
+            .iter()
+            .find(|o| {
+                matches!(o, ObjectSchema::Table(_)) && o.as_table().unwrap().root_page == page_index
+            })
+            .map(|o| o.as_table().unwrap().column_names.clone())
+            .unwrap();
+
+        let mut records: Vec<Record> = Vec::new();
+        let mut pages_to_read: Vec<usize> = vec![page_index];
+        while let Some(page_index) = pages_to_read.pop() {
+            let page_input = &input[self.header.page_size * (page_index - 1)
+                ..self.header.page_size * (page_index - 1) + self.header.page_size];
+            let page = Page::parse(
+                page_input,
+                false,
+                &column_names,
+                self.header.page_size - self.header.end_page_reserved_bytes,
+            )
+            .expect("failed to parse page")
+            .1;
+
+            // TODO: When to follow rightmost pointer?
+            if let Some(rightmost_pointer) = page.rightmost_pointer {
+                pages_to_read.push(rightmost_pointer);
+            }
+
+            for cell in page.cells {
+                match cell {
+                    Cell::TableLeaf(record) => {
+                        if row_ids.contains(&record.values.get("id").unwrap().as_integer().unwrap())
+                        {
+                            records.push(record)
+                        }
+                    }
+                    Cell::TableInterior {
+                        left_child_pointer,
+                        key,
+                    } => {
+                        if row_ids.iter().any(|id| *id < key) {
+                            pages_to_read.push(left_child_pointer as usize)
+                        }
+                    }
+                    _ => unreachable!(),
                 }
             }
         }
