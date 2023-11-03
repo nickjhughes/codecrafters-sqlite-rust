@@ -43,7 +43,7 @@ pub struct CreateQuery {
 impl Query {
     pub fn parse(query_str: &str) -> anyhow::Result<Self> {
         if query_str.to_ascii_lowercase().starts_with("select") {
-            let mut parts = query_str.split_whitespace();
+            let mut parts = query_str.split_whitespace().peekable();
             assert_eq!(
                 parts.next().map(|s| s.to_ascii_lowercase()),
                 Some("select".into())
@@ -67,16 +67,24 @@ impl Query {
             if parts.next().map(|s| s.to_ascii_lowercase()) == Some("where".into()) {
                 let column_name = parts.next().unwrap().to_ascii_lowercase();
                 assert_eq!(parts.next(), Some("="));
-                let column_value = {
-                    let value = parts.next().unwrap();
-                    if value.starts_with('\'') {
-                        // Interpret as text
-                        Value::Text(value.trim_matches('\'').to_owned())
-                    } else {
-                        // Interpret as number
-                        todo!()
+
+                let column_value = if parts.peek().unwrap().starts_with('\'') {
+                    // Interpret as text
+                    let mut text = String::new();
+                    loop {
+                        let next_part = parts.next().unwrap();
+                        text.push_str(next_part.trim_matches('\''));
+                        if next_part.ends_with('\'') {
+                            break;
+                        }
+                        text.push(' ');
                     }
+                    Value::Text(text)
+                } else {
+                    // Interpret as number
+                    todo!()
                 };
+
                 filters.push(Filter {
                     column_name,
                     column_value,
@@ -116,15 +124,13 @@ impl Query {
         match self {
             Query::Select(select) => {
                 let table_root_page = db.schema.table_root_page(&select.table_name)?;
-                let page = db.parse_page(db_data, table_root_page)?;
+                let records = db.get_full_table(db_data, table_root_page)?;
 
                 let mut results = Vec::new();
-                for cell in page.cells.iter() {
+                for record in records.iter() {
                     let mut filtered_out = false;
                     for filter in select.filters.iter() {
-                        let value = cell
-                            .as_record()
-                            .unwrap()
+                        let value = record
                             .values
                             .get(&filter.column_name)
                             .expect("invalid column name");
@@ -139,14 +145,11 @@ impl Query {
 
                     let mut row = Vec::new();
                     for column in select.columns.iter() {
+                        #[allow(clippy::single_match)]
                         match column {
                             Column::ColumnName(column_name) => {
-                                let value = cell
-                                    .as_record()
-                                    .unwrap()
-                                    .values
-                                    .get(column_name)
-                                    .expect("invalid column name");
+                                let value =
+                                    record.values.get(column_name).expect("invalid column name");
                                 row.push(value.to_string());
                             }
                             _ => {}

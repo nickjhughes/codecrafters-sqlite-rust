@@ -155,8 +155,7 @@ impl Record {
         input: &'input [u8],
         column_names: &[String],
     ) -> IResult<&'input [u8], Self> {
-        // let (input, _record_size) = varint(input)?;
-        let (input, _row_id) = varint(input)?;
+        let (input, row_id) = varint(input)?;
 
         let mut header_bytes_read = 0;
         let before_input_len = input.len();
@@ -173,20 +172,32 @@ impl Record {
             column_types.push(column_type);
         }
         assert_eq!(header_bytes_read, header_size as usize);
-        // dbg!(&column_types);
 
         let mut values = HashMap::new();
         for (column_name, column_type) in column_names.iter().zip(column_types.iter()) {
             match column_type {
                 ColumnType::Null => {
-                    values.insert(column_name.to_string(), Value::Null);
+                    if column_name == "id" {
+                        // FIXME: This is only an alias for `rowid` when it has type
+                        // "INTEGER PRIMARY KEY" - it's not based on the name
+                        values.insert(column_name.to_string(), Value::Integer(row_id));
+                    } else {
+                        values.insert(column_name.to_string(), Value::Null);
+                    }
                 }
                 ColumnType::I8 => {
                     let (remainder, value) = i8(rest)?;
                     rest = remainder;
                     values.insert(column_name.to_string(), Value::Integer(value as i64));
                 }
-                ColumnType::I16 => todo!(),
+                ColumnType::I16 => {
+                    let (remainder, bytes) = take(2usize)(rest)?;
+                    rest = remainder;
+                    values.insert(
+                        column_name.to_string(),
+                        Value::Integer(i16::from_be_bytes([bytes[0], bytes[1]]) as i64),
+                    );
+                }
                 ColumnType::I24 => todo!(),
                 ColumnType::I32 => todo!(),
                 ColumnType::I48 => todo!(),

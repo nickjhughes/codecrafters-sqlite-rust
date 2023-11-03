@@ -5,6 +5,8 @@ use nom::{
     IResult,
 };
 
+pub const HEADER_SIZE: usize = 100;
+
 use crate::error::{InvalidValueError, MyError};
 
 #[derive(Debug)]

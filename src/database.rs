@@ -1,4 +1,10 @@
-use super::{header::Header, page::Page, query::Query};
+use crate::{
+    cell::Cell,
+    header::{Header, HEADER_SIZE},
+    page::Page,
+    query::Query,
+    record::Record,
+};
 
 pub struct Database {
     pub header: Header,
@@ -40,7 +46,7 @@ impl Database {
     /// Parse the first page of the database file, containing the header and a schema.
     pub fn parse_header_and_schema(input: &[u8]) -> anyhow::Result<Self> {
         let (rest, header) = Header::parse(input).expect("failed to parse header");
-        let first_page_data = &rest[0..(header.page_size - 100)];
+        let first_page_data = &rest[0..(header.page_size - HEADER_SIZE)];
         let (_, first_page) = Page::parse(
             first_page_data,
             true,
@@ -101,7 +107,7 @@ impl Database {
         })
     }
 
-    pub fn parse_page(&self, input: &[u8], page_index: usize) -> anyhow::Result<Page> {
+    pub fn get_full_table(&self, input: &[u8], page_index: usize) -> anyhow::Result<Vec<Record>> {
         assert!(page_index > 1);
 
         let column_names = self
@@ -114,17 +120,37 @@ impl Database {
             .map(|o| o.as_table().unwrap().column_names.clone())
             .unwrap();
 
-        let page_input = &input[self.header.page_size * (page_index - 1)
-            ..self.header.page_size * (page_index - 1) + self.header.page_size];
+        let mut records: Vec<Record> = Vec::new();
+        let mut pages_to_read: Vec<usize> = vec![page_index];
+        while let Some(page_index) = pages_to_read.pop() {
+            let page_input = &input[self.header.page_size * (page_index - 1)
+                ..self.header.page_size * (page_index - 1) + self.header.page_size];
+            let page = Page::parse(
+                page_input,
+                false,
+                &column_names,
+                self.header.page_size - self.header.end_page_reserved_bytes,
+            )
+            .expect("failed to parse page")
+            .1;
 
-        Ok(Page::parse(
-            page_input,
-            false,
-            &column_names,
-            self.header.page_size - self.header.end_page_reserved_bytes,
-        )
-        .expect("failed to parse page")
-        .1)
+            if let Some(rightmost_pointer) = page.rightmost_pointer {
+                pages_to_read.push(rightmost_pointer);
+            }
+
+            for cell in page.cells {
+                match cell {
+                    Cell::TableLeaf(record) => records.push(record),
+                    Cell::TableInterior {
+                        left_child_pointer, ..
+                    } => pages_to_read.push(left_child_pointer as usize),
+                    Cell::IndexLeaf => todo!(),
+                    Cell::IndexInterior => todo!(),
+                }
+            }
+        }
+
+        Ok(records)
     }
 }
 
