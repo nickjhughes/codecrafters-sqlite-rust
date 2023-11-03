@@ -198,11 +198,27 @@ impl Record {
                         Value::Integer(i16::from_be_bytes([bytes[0], bytes[1]]) as i64),
                     );
                 }
-                ColumnType::I24 => todo!(),
-                ColumnType::I32 => todo!(),
-                ColumnType::I48 => todo!(),
-                ColumnType::I64 => todo!(),
-                ColumnType::F64 => todo!(),
+                ColumnType::I24 => {
+                    let (remainder, bytes) = take(3usize)(rest)?;
+                    rest = remainder;
+                    values.insert(
+                        column_name.to_string(),
+                        Value::Integer(i32::from_be_bytes([0, bytes[0], bytes[1], bytes[2]]) as i64),
+                    );
+                }
+                ColumnType::I32 => {
+                    let (remainder, bytes) = take(4usize)(rest)?;
+                    rest = remainder;
+                    values.insert(
+                        column_name.to_string(),
+                        Value::Integer(
+                            i32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as i64,
+                        ),
+                    );
+                }
+                ColumnType::I48 => todo!("i48 column"),
+                ColumnType::I64 => todo!("i64 column"),
+                ColumnType::F64 => todo!("f64 column"),
                 ColumnType::Zero => {
                     values.insert(column_name.to_string(), Value::Integer(0i64));
                 }

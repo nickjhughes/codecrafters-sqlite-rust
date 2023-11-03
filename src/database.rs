@@ -95,7 +95,8 @@ impl Database {
                         column_names,
                     })
                 }
-                _ => todo!("non-table object"),
+                "index" => ObjectSchema::Index,
+                _ => todo!("non-table/index object"),
             };
 
             objects.push(object);
