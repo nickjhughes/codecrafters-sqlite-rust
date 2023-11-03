@@ -18,8 +18,8 @@ fn main() -> Result<()> {
         _ => {}
     }
 
-    let db_data = std::fs::read(&args[1])?;
-    let db = database::Database::parse_header_and_schema(&db_data)?;
+    let mut file = std::fs::File::open(&args[1])?;
+    let db = database::Database::parse_header_and_schema(&mut file)?;
 
     let command = &args[2];
     match command.as_str() {
@@ -34,7 +34,7 @@ fn main() -> Result<()> {
         }
         query_str => {
             let query = Query::parse(query_str)?;
-            let results = query.execute(&db, &db_data)?;
+            let results = query.execute(&db, &mut file)?;
             for row in results.iter() {
                 println!("{}", row.join("|"));
             }

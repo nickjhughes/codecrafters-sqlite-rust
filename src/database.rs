@@ -60,11 +60,19 @@ pub struct IndexSchema {
 
 impl Database {
     /// Parse the first page of the database file, containing the header and a schema.
-    pub fn parse_header_and_schema(input: &[u8]) -> anyhow::Result<Self> {
-        let (rest, header) = Header::parse(input).expect("failed to parse header");
-        let first_page_data = &rest[0..(header.page_size - HEADER_SIZE)];
+    pub fn parse_header_and_schema<R>(mut file: R) -> anyhow::Result<Self>
+    where
+        R: std::io::Read,
+    {
+        let mut header_buf = [0; HEADER_SIZE];
+        file.read_exact(&mut header_buf)?;
+        let (rest, header) = Header::parse(&header_buf).expect("failed to parse header");
+        assert!(rest.is_empty());
+
+        let mut first_page_data = vec![0; header.page_size - HEADER_SIZE];
+        file.read_exact(&mut first_page_data)?;
         let (_, first_page) = Page::parse(
-            first_page_data,
+            &first_page_data,
             true,
             &[
                 "type".to_string(),
@@ -148,7 +156,10 @@ impl Database {
         })
     }
 
-    pub fn get_full_table(&self, input: &[u8], page_index: usize) -> anyhow::Result<Vec<Record>> {
+    pub fn get_full_table<R>(&self, mut file: R, page_index: usize) -> anyhow::Result<Vec<Record>>
+    where
+        R: std::io::Read + std::io::Seek,
+    {
         assert!(page_index > 1);
 
         let column_names = self
@@ -163,11 +174,16 @@ impl Database {
 
         let mut records: Vec<Record> = Vec::new();
         let mut pages_to_read: Vec<usize> = vec![page_index];
+        let mut page_buffer = vec![0; self.header.page_size];
         while let Some(page_index) = pages_to_read.pop() {
-            let page_input = &input[self.header.page_size * (page_index - 1)
-                ..self.header.page_size * (page_index - 1) + self.header.page_size];
+            file.seek(std::io::SeekFrom::Start(
+                (self.header.page_size * (page_index - 1)) as u64,
+            ))?;
+            file.read_exact(&mut page_buffer)?;
+            // let page_input = &input[self.header.page_size * (page_index - 1)
+            //     ..self.header.page_size * (page_index - 1) + self.header.page_size];
             let page = Page::parse(
-                page_input,
+                &page_buffer,
                 false,
                 &column_names,
                 self.header.page_size - self.header.end_page_reserved_bytes,
@@ -193,13 +209,16 @@ impl Database {
         Ok(records)
     }
 
-    pub fn search_index(
+    pub fn search_index<R>(
         &self,
-        input: &[u8],
+        mut file: R,
         page_index: usize,
         key_name: String,
         key: Value,
-    ) -> anyhow::Result<Vec<i64>> {
+    ) -> anyhow::Result<Vec<i64>>
+    where
+        R: std::io::Read + std::io::Seek,
+    {
         assert!(page_index > 1);
 
         let column_name = self
@@ -214,11 +233,16 @@ impl Database {
 
         let mut row_ids = Vec::new();
         let mut pages_to_read: Vec<usize> = vec![page_index];
+        let mut page_buffer = vec![0; self.header.page_size];
         while let Some(page_index) = pages_to_read.pop() {
-            let page_input = &input[self.header.page_size * (page_index - 1)
-                ..self.header.page_size * (page_index - 1) + self.header.page_size];
+            file.seek(std::io::SeekFrom::Start(
+                (self.header.page_size * (page_index - 1)) as u64,
+            ))?;
+            file.read_exact(&mut page_buffer)?;
+            // let page_input = &input[self.header.page_size * (page_index - 1)
+            //     ..self.header.page_size * (page_index - 1) + self.header.page_size];
             let page = Page::parse(
-                page_input,
+                &page_buffer,
                 false,
                 &[column_name.clone(), "row_id".into()],
                 self.header.page_size - self.header.end_page_reserved_bytes,
@@ -259,12 +283,15 @@ impl Database {
         Ok(row_ids)
     }
 
-    pub fn get_by_row_ids(
+    pub fn get_by_row_ids<R>(
         &self,
-        input: &[u8],
+        mut file: R,
         page_index: usize,
         row_ids: &[i64],
-    ) -> anyhow::Result<Vec<Record>> {
+    ) -> anyhow::Result<Vec<Record>>
+    where
+        R: std::io::Read + std::io::Seek,
+    {
         assert!(page_index > 1);
 
         let column_names = self
@@ -279,11 +306,16 @@ impl Database {
 
         let mut records: Vec<Record> = Vec::new();
         let mut pages_to_read: Vec<usize> = vec![page_index];
+        let mut page_buffer = vec![0; self.header.page_size];
         while let Some(page_index) = pages_to_read.pop() {
-            let page_input = &input[self.header.page_size * (page_index - 1)
-                ..self.header.page_size * (page_index - 1) + self.header.page_size];
+            file.seek(std::io::SeekFrom::Start(
+                (self.header.page_size * (page_index - 1)) as u64,
+            ))?;
+            file.read_exact(&mut page_buffer)?;
+            // let page_input = &input[self.header.page_size * (page_index - 1)
+            //     ..self.header.page_size * (page_index - 1) + self.header.page_size];
             let page = Page::parse(
-                page_input,
+                &page_buffer,
                 false,
                 &column_names,
                 self.header.page_size - self.header.end_page_reserved_bytes,

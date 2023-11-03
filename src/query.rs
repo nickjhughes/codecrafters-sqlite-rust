@@ -123,43 +123,43 @@ impl Query {
         }
     }
 
-    pub fn execute(&self, db: &Database, db_data: &[u8]) -> anyhow::Result<Vec<Vec<String>>> {
+    pub fn execute<R>(&self, db: &Database, mut file: R) -> anyhow::Result<Vec<Vec<String>>>
+    where
+        R: std::io::Read + std::io::Seek,
+    {
         match self {
             Query::Select(select) => {
                 let mut need_to_filter = true;
 
-                let records = if let Some(filter) = select.filters.iter().next() {
+                let records = if let Some(filter) = select.filters.first() {
                     // See if we can use an index
                     let mut index = None;
                     for object in db.schema.objects.iter() {
-                        match object {
-                            ObjectSchema::Index(idx) => {
-                                if idx.column_name == filter.column_name {
-                                    index = Some(idx);
-                                }
+                        if let ObjectSchema::Index(idx) = object {
+                            if idx.column_name == filter.column_name {
+                                index = Some(idx);
                             }
-                            _ => {}
                         }
                     }
                     if let Some(index) = index {
                         let row_ids = db.search_index(
-                            db_data,
+                            &mut file,
                             index.root_page,
                             filter.column_name.clone(),
                             filter.column_value.clone(),
                         )?;
                         need_to_filter = false;
                         let table_root_page = db.schema.table_root_page(&select.table_name)?;
-                        db.get_by_row_ids(db_data, table_root_page, &row_ids)?
+                        db.get_by_row_ids(file, table_root_page, &row_ids)?
                     } else {
                         // Full table scan
                         let table_root_page = db.schema.table_root_page(&select.table_name)?;
-                        db.get_full_table(db_data, table_root_page)?
+                        db.get_full_table(file, table_root_page)?
                     }
                 } else {
                     // Full table scan
                     let table_root_page = db.schema.table_root_page(&select.table_name)?;
-                    db.get_full_table(db_data, table_root_page)?
+                    db.get_full_table(file, table_root_page)?
                 };
 
                 let mut results = Vec::new();
