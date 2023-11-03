@@ -9,6 +9,8 @@ use crate::{
 pub struct Database {
     pub header: Header,
     pub schema: Schema,
+    pub table_pages_parsed: usize,
+    pub index_pages_parsed: usize,
 }
 
 #[derive(Debug)]
@@ -74,13 +76,8 @@ impl Database {
         let (_, first_page) = Page::parse(
             &first_page_data,
             true,
-            &[
-                "type".to_string(),
-                "name".to_string(),
-                "tbl_name".to_string(),
-                "rootpage".to_string(),
-                "sql".to_string(),
-            ],
+            &["type", "name", "tbl_name", "rootpage", "sql"],
+            &[0, 1, 2, 3, 4],
             header.page_size - header.end_page_reserved_bytes,
         )
         .expect("failed to parse first page");
@@ -88,58 +85,28 @@ impl Database {
         let mut objects = Vec::new();
         for object_cell in first_page.cells.iter() {
             let object_record = object_cell.as_record().unwrap();
-            let object = match object_record.values.get("type").unwrap().as_text().unwrap() {
+            let object = match object_record.values[0].as_text().unwrap() {
                 "table" => {
-                    let create_query_str =
-                        object_record.values.get("sql").unwrap().as_text().unwrap();
+                    let create_query_str = object_record.values[4].as_text().unwrap();
                     let create_query = Query::parse(create_query_str)?;
                     let column_names = create_query.as_create().unwrap().column_names.clone();
 
                     ObjectSchema::Table(TableSchema {
-                        name: object_record
-                            .values
-                            .get("name")
-                            .unwrap()
-                            .as_text()
-                            .unwrap()
-                            .to_owned(),
-                        root_page: object_record
-                            .values
-                            .get("rootpage")
-                            .unwrap()
-                            .as_integer()
-                            .unwrap() as usize,
+                        name: object_record.values[1].as_text().unwrap().to_owned(),
+                        root_page: object_record.values[3].as_integer().unwrap() as usize,
                         sql: create_query_str.to_owned(),
                         column_names,
                     })
                 }
                 "index" => {
-                    let create_query_str =
-                        object_record.values.get("sql").unwrap().as_text().unwrap();
+                    let create_query_str = object_record.values[4].as_text().unwrap();
                     let create_query = Query::parse(create_query_str)?;
                     let column_name = create_query.as_create().unwrap().column_names[0].clone();
 
                     ObjectSchema::Index(IndexSchema {
-                        name: object_record
-                            .values
-                            .get("name")
-                            .unwrap()
-                            .as_text()
-                            .unwrap()
-                            .to_owned(),
-                        table_name: object_record
-                            .values
-                            .get("tbl_name")
-                            .unwrap()
-                            .as_text()
-                            .unwrap()
-                            .to_owned(),
-                        root_page: object_record
-                            .values
-                            .get("rootpage")
-                            .unwrap()
-                            .as_integer()
-                            .unwrap() as usize,
+                        name: object_record.values[1].as_text().unwrap().to_owned(),
+                        table_name: object_record.values[2].as_text().unwrap().to_owned(),
+                        root_page: object_record.values[3].as_integer().unwrap() as usize,
                         sql: create_query_str.to_owned(),
                         column_name,
                     })
@@ -153,24 +120,22 @@ impl Database {
         Ok(Database {
             header,
             schema: Schema { objects },
+            table_pages_parsed: 1,
+            index_pages_parsed: 0,
         })
     }
 
-    pub fn get_full_table<R>(&self, mut file: R, page_index: usize) -> anyhow::Result<Vec<Record>>
+    pub fn get_full_table<R>(
+        &mut self,
+        mut file: R,
+        page_index: usize,
+        column_names: &[&str],
+        column_indices: &[usize],
+    ) -> anyhow::Result<Vec<Record>>
     where
         R: std::io::Read + std::io::Seek,
     {
         assert!(page_index > 1);
-
-        let column_names = self
-            .schema
-            .objects
-            .iter()
-            .find(|o| {
-                matches!(o, ObjectSchema::Table(_)) && o.as_table().unwrap().root_page == page_index
-            })
-            .map(|o| o.as_table().unwrap().column_names.clone())
-            .unwrap();
 
         let mut records: Vec<Record> = Vec::new();
         let mut pages_to_read: Vec<usize> = vec![page_index];
@@ -180,16 +145,16 @@ impl Database {
                 (self.header.page_size * (page_index - 1)) as u64,
             ))?;
             file.read_exact(&mut page_buffer)?;
-            // let page_input = &input[self.header.page_size * (page_index - 1)
-            //     ..self.header.page_size * (page_index - 1) + self.header.page_size];
             let page = Page::parse(
                 &page_buffer,
                 false,
-                &column_names,
+                column_names,
+                column_indices,
                 self.header.page_size - self.header.end_page_reserved_bytes,
             )
             .expect("failed to parse page")
             .1;
+            self.table_pages_parsed += 1;
 
             if let Some(rightmost_pointer) = page.rightmost_pointer {
                 pages_to_read.push(rightmost_pointer);
@@ -210,10 +175,9 @@ impl Database {
     }
 
     pub fn search_index<R>(
-        &self,
+        &mut self,
         mut file: R,
         page_index: usize,
-        key_name: String,
         key: Value,
     ) -> anyhow::Result<Vec<i64>>
     where
@@ -239,19 +203,19 @@ impl Database {
                 (self.header.page_size * (page_index - 1)) as u64,
             ))?;
             file.read_exact(&mut page_buffer)?;
-            // let page_input = &input[self.header.page_size * (page_index - 1)
-            //     ..self.header.page_size * (page_index - 1) + self.header.page_size];
             let page = Page::parse(
                 &page_buffer,
                 false,
-                &[column_name.clone(), "row_id".into()],
+                &[&column_name, "row_id"],
+                &[0, 1],
                 self.header.page_size - self.header.end_page_reserved_bytes,
             )
             .expect("failed to parse page")
             .1;
+            self.index_pages_parsed += 1;
 
-            // TODO: Only parse `rightmost_pointer` and `left_child_pointer` pages
-            //       if the entries we're interested in will appear there
+            // TODO: Only parse `rightmost_pointer` page if the entries we're interested in
+            // will appear there
 
             if let Some(rightmost_pointer) = page.rightmost_pointer {
                 pages_to_read.push(rightmost_pointer);
@@ -260,19 +224,19 @@ impl Database {
             for cell in page.cells {
                 match cell {
                     Cell::IndexLeaf(record) => {
-                        if *record.values.get(&key_name).unwrap() == key {
-                            row_ids
-                                .push(record.values.get("row_id").unwrap().as_integer().unwrap());
+                        if record.values[0] == key {
+                            row_ids.push(record.values[1].as_integer().unwrap());
                         }
                     }
                     Cell::IndexInterior {
                         left_child_pointer,
                         record,
                     } => {
-                        pages_to_read.push(left_child_pointer as usize);
-                        if *record.values.get(&key_name).unwrap() == key {
-                            row_ids
-                                .push(record.values.get("row_id").unwrap().as_integer().unwrap());
+                        if record.values[0] >= key {
+                            pages_to_read.push(left_child_pointer as usize);
+                        }
+                        if record.values[0] == key {
+                            row_ids.push(record.values[1].as_integer().unwrap());
                         }
                     }
                     _ => unreachable!(),
@@ -284,25 +248,17 @@ impl Database {
     }
 
     pub fn get_by_row_ids<R>(
-        &self,
+        &mut self,
         mut file: R,
         page_index: usize,
         row_ids: &[i64],
+        column_names: &[&str],
+        column_indices: &[usize],
     ) -> anyhow::Result<Vec<Record>>
     where
         R: std::io::Read + std::io::Seek,
     {
         assert!(page_index > 1);
-
-        let column_names = self
-            .schema
-            .objects
-            .iter()
-            .find(|o| {
-                matches!(o, ObjectSchema::Table(_)) && o.as_table().unwrap().root_page == page_index
-            })
-            .map(|o| o.as_table().unwrap().column_names.clone())
-            .unwrap();
 
         let mut records: Vec<Record> = Vec::new();
         let mut pages_to_read: Vec<usize> = vec![page_index];
@@ -312,16 +268,18 @@ impl Database {
                 (self.header.page_size * (page_index - 1)) as u64,
             ))?;
             file.read_exact(&mut page_buffer)?;
-            // let page_input = &input[self.header.page_size * (page_index - 1)
-            //     ..self.header.page_size * (page_index - 1) + self.header.page_size];
             let page = Page::parse(
                 &page_buffer,
                 false,
-                &column_names,
+                column_names,
+                column_indices,
                 self.header.page_size - self.header.end_page_reserved_bytes,
             )
             .expect("failed to parse page")
             .1;
+            self.table_pages_parsed += 1;
+
+            let id_column_index = column_names.iter().position(|c| *c == "id").unwrap();
 
             // TODO: When to follow rightmost pointer?
             if let Some(rightmost_pointer) = page.rightmost_pointer {
@@ -331,8 +289,7 @@ impl Database {
             for cell in page.cells {
                 match cell {
                     Cell::TableLeaf(record) => {
-                        if row_ids.contains(&record.values.get("id").unwrap().as_integer().unwrap())
-                        {
+                        if row_ids.contains(&record.values[id_column_index].as_integer().unwrap()) {
                             records.push(record)
                         }
                     }

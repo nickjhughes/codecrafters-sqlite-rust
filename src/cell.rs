@@ -26,7 +26,8 @@ impl Cell {
         input: &'input [u8],
         ty: BTreePageType,
         usable_page_size: usize,
-        column_names: &[String],
+        column_names: &[&str],
+        column_indices: &[usize],
     ) -> IResult<&'input [u8], Self> {
         let (input, left_child_pointer) = if matches!(ty, BTreePageType::IndexInterior) {
             let (input, left_child_pointer) = be_u32(input)?;
@@ -78,12 +79,14 @@ impl Cell {
                 ))
             }
             BTreePageType::TableLeaf => {
-                let (input, record) = Record::parse(input, column_names, RecordType::Table)?;
+                let (input, record) =
+                    Record::parse(input, column_names, column_indices, RecordType::Table)?;
                 Ok((input, Cell::TableLeaf(record)))
             }
             BTreePageType::IndexInterior => {
                 let left_child_pointer = left_child_pointer.unwrap();
-                let (input, record) = Record::parse(input, column_names, RecordType::Index)?;
+                let (input, record) =
+                    Record::parse(input, column_names, column_indices, RecordType::Index)?;
                 Ok((
                     input,
                     Cell::IndexInterior {
@@ -93,7 +96,8 @@ impl Cell {
                 ))
             }
             BTreePageType::IndexLeaf => {
-                let (input, record) = Record::parse(input, column_names, RecordType::Index)?;
+                let (input, record) =
+                    Record::parse(input, column_names, column_indices, RecordType::Index)?;
                 Ok((input, Cell::IndexLeaf(record)))
             }
         }

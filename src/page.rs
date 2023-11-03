@@ -67,7 +67,8 @@ impl Page {
     pub fn parse<'input>(
         input: &'input [u8],
         is_first_page: bool,
-        column_names: &[String],
+        column_names: &[&str],
+        column_indices: &[usize],
         usable_page_size: usize,
     ) -> IResult<&'input [u8], Self> {
         let (input, page_type) = u8(input)?;
@@ -121,8 +122,13 @@ impl Page {
                     let (remainder, _) = take(*cell_offset as usize - position)(rest)?;
                     position = *cell_offset as usize;
                     rest = remainder;
-                    let (remainder, cell) =
-                        Cell::parse(rest, *b_tree_page_type, usable_page_size, column_names)?;
+                    let (remainder, cell) = Cell::parse(
+                        rest,
+                        *b_tree_page_type,
+                        usable_page_size,
+                        column_names,
+                        column_indices,
+                    )?;
                     cells.push(cell);
                     let cell_size = rest.len() - remainder.len();
                     rest = remainder;

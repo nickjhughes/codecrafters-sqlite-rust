@@ -1,11 +1,10 @@
 use nom::{bytes::complete::take, number::complete::i8, IResult};
-use std::collections::HashMap;
 
 use crate::varint::varint;
 
 #[derive(Debug)]
 pub struct Record {
-    pub values: HashMap<String, Value>,
+    pub values: Vec<Value>,
 }
 
 #[derive(Debug)]
@@ -32,6 +31,32 @@ pub enum Value {
     Real(f64),
     Text(String),
     Blob(String),
+}
+
+impl PartialOrd for Value {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        match self {
+            Value::Null => None,
+            Value::Integer(n1) => match other {
+                Value::Integer(n2) => n1.partial_cmp(n2),
+                _ => None,
+            },
+            Value::Real(f1) => match other {
+                Value::Real(f2) => f1.partial_cmp(f2),
+                _ => None,
+            },
+            Value::Text(s1) => match other {
+                Value::Text(s2) => s1.partial_cmp(s2),
+                Value::Blob(s2) => s1.partial_cmp(s2),
+                _ => None,
+            },
+            Value::Blob(s1) => match other {
+                Value::Text(s2) => s1.partial_cmp(s2),
+                Value::Blob(s2) => s1.partial_cmp(s2),
+                _ => None,
+            },
+        }
+    }
 }
 
 impl PartialEq for Value {
@@ -159,7 +184,8 @@ pub enum RecordType {
 impl Record {
     pub fn parse<'input>(
         input: &'input [u8],
-        column_names: &[String],
+        column_names: &[&str],
+        column_indices: &[usize],
         record_type: RecordType,
     ) -> IResult<&'input [u8], Self> {
         let (input, row_id) = if record_type == RecordType::Table {
@@ -172,94 +198,108 @@ impl Record {
         let mut header_bytes_read = 0;
         let before_input_len = input.len();
         let (input, header_size) = varint(input)?;
+        let header_size = header_size as usize;
         header_bytes_read += before_input_len - input.len();
 
         let mut rest = input;
         let mut column_types = Vec::new();
-        for _ in 0..column_names.len() {
+        while header_bytes_read < header_size {
             let (remainder, column_type) = varint(rest)?;
             header_bytes_read += rest.len() - remainder.len();
             rest = remainder;
             let column_type = ColumnType::try_from(column_type).expect("invalid column type");
             column_types.push(column_type);
         }
-        assert_eq!(header_bytes_read, header_size as usize);
 
-        let mut values = HashMap::new();
-        for (column_name, column_type) in column_names.iter().zip(column_types.iter()) {
+        let mut values = Vec::with_capacity(column_names.len());
+        for (i, column_type) in column_types.iter().enumerate() {
+            let to_include = column_indices.contains(&i);
+            let is_rowid_alias = if to_include {
+                // FIXME: This is only an alias for `rowid` when it has type
+                // "INTEGER PRIMARY KEY" - it's not based on the name
+                column_names[column_indices.iter().position(|j| i == *j).unwrap()] == "id"
+            } else {
+                false
+            };
+
             match column_type {
                 ColumnType::Null => {
-                    if record_type == RecordType::Table && column_name == "id" {
-                        // FIXME: This is only an alias for `rowid` when it has type
-                        // "INTEGER PRIMARY KEY" - it's not based on the name
-                        values.insert(column_name.to_string(), Value::Integer(row_id.unwrap()));
-                    } else {
-                        values.insert(column_name.to_string(), Value::Null);
+                    if to_include {
+                        if record_type == RecordType::Table && is_rowid_alias {
+                            values.push(Value::Integer(row_id.unwrap()));
+                        } else {
+                            values.push(Value::Null);
+                        }
                     }
                 }
                 ColumnType::I8 => {
                     let (remainder, value) = i8(rest)?;
                     rest = remainder;
-                    values.insert(column_name.to_string(), Value::Integer(value as i64));
+                    if to_include {
+                        values.push(Value::Integer(value as i64));
+                    }
                 }
                 ColumnType::I16 => {
                     let (remainder, bytes) = take(2usize)(rest)?;
                     rest = remainder;
-                    values.insert(
-                        column_name.to_string(),
-                        Value::Integer(i16::from_be_bytes([bytes[0], bytes[1]]) as i64),
-                    );
+                    if to_include {
+                        values.push(Value::Integer(
+                            i16::from_be_bytes([bytes[0], bytes[1]]) as i64
+                        ));
+                    }
                 }
                 ColumnType::I24 => {
                     let (remainder, bytes) = take(3usize)(rest)?;
                     rest = remainder;
-                    values.insert(
-                        column_name.to_string(),
-                        Value::Integer(i32::from_be_bytes([0, bytes[0], bytes[1], bytes[2]]) as i64),
-                    );
+                    if to_include {
+                        values.push(Value::Integer(i32::from_be_bytes([
+                            0, bytes[0], bytes[1], bytes[2],
+                        ]) as i64));
+                    }
                 }
                 ColumnType::I32 => {
                     let (remainder, bytes) = take(4usize)(rest)?;
                     rest = remainder;
-                    values.insert(
-                        column_name.to_string(),
-                        Value::Integer(
-                            i32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as i64,
-                        ),
-                    );
+                    if to_include {
+                        values.push(Value::Integer(i32::from_be_bytes([
+                            bytes[0], bytes[1], bytes[2], bytes[3],
+                        ]) as i64));
+                    }
                 }
                 ColumnType::I48 => todo!("i48 column"),
                 ColumnType::I64 => todo!("i64 column"),
                 ColumnType::F64 => todo!("f64 column"),
                 ColumnType::Zero => {
-                    values.insert(column_name.to_string(), Value::Integer(0i64));
+                    if to_include {
+                        values.push(Value::Integer(0i64));
+                    }
                 }
                 ColumnType::One => {
-                    values.insert(column_name.to_string(), Value::Integer(0i64));
+                    if to_include {
+                        values.push(Value::Integer(0i64));
+                    }
                 }
                 ColumnType::Blob(size) => {
                     let (remainder, bytes) = take(*size)(rest)?;
                     rest = remainder;
-                    values.insert(
-                        column_name.to_string(),
-                        Value::Blob(
+                    if to_include {
+                        values.push(Value::Blob(
                             std::str::from_utf8(bytes)
                                 .expect("non utf-8 text")
                                 .to_owned(),
-                        ),
-                    );
+                        ));
+                    }
                 }
                 ColumnType::Text(size) => {
                     let (remainder, bytes) = take(*size)(rest)?;
                     rest = remainder;
-                    values.insert(
-                        column_name.to_string(),
-                        Value::Text(
+                    if to_include {
+                        values.push(Value::Text(
                             std::str::from_utf8(bytes)
                                 .expect("non utf-8 text")
                                 .to_owned(),
-                        ),
-                    );
+                        ));
+                    }
                 }
             }
         }

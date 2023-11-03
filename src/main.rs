@@ -19,7 +19,7 @@ fn main() -> Result<()> {
     }
 
     let mut file = std::fs::File::open(&args[1])?;
-    let db = database::Database::parse_header_and_schema(&mut file)?;
+    let mut db = database::Database::parse_header_and_schema(&mut file)?;
 
     let command = &args[2];
     match command.as_str() {
@@ -34,12 +34,17 @@ fn main() -> Result<()> {
         }
         query_str => {
             let query = Query::parse(query_str)?;
-            let results = query.execute(&db, &mut file)?;
+            let results = query.execute(&mut db, &mut file)?;
             for row in results.iter() {
                 println!("{}", row.join("|"));
             }
         }
     }
+
+    eprintln!(
+        "Parsed {} table pages and {} index pages",
+        db.table_pages_parsed, db.index_pages_parsed
+    );
 
     Ok(())
 }
