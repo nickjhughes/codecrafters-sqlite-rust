@@ -51,12 +51,13 @@ impl Database {
                 "rootpage".to_string(),
                 "sql".to_string(),
             ],
-            header.page_size as usize - header.end_page_reserved_bytes as usize,
+            header.page_size as usize - header.end_page_reserved_bytes,
         )
         .expect("failed to parse first page");
 
         let mut objects = Vec::new();
-        for object_record in first_page.records.iter() {
+        for object_cell in first_page.cells.iter() {
+            let object_record = object_cell.as_record().unwrap();
             let object = match object_record.values.get("type").unwrap().as_text().unwrap() {
                 "table" => {
                     let create_query_str =
@@ -120,7 +121,7 @@ impl Database {
             page_input,
             false,
             &column_names,
-            self.header.page_size as usize - self.header.end_page_reserved_bytes as usize,
+            self.header.page_size as usize - self.header.end_page_reserved_bytes,
         )
         .expect("failed to parse page")
         .1)

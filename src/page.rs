@@ -5,11 +5,11 @@ use nom::{
     IResult,
 };
 
-use super::{record::Record, varint::varint};
+use super::cell::Cell;
 
 pub struct Page {
     pub ty: PageType,
-    pub records: Vec<Record>,
+    pub cells: Vec<Cell>,
 }
 
 #[allow(dead_code)]
@@ -36,7 +36,7 @@ pub enum FreelistPageType {
     Leaf,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum BTreePageType {
     /// A table b-tree interior page.
     TableInterior,
@@ -71,16 +71,15 @@ impl Page {
     ) -> IResult<&'input [u8], Self> {
         let (input, page_type) = u8(input)?;
         let page_type = PageType::try_from(page_type).expect("invalid page type");
-        dbg!(&page_type);
 
-        let (input, records) = match &page_type {
+        let (input, cells) = match &page_type {
             PageType::BTree(b_tree_page_type) => {
                 // Header
                 let (input, _first_freelock) = be_u16(input)?;
                 let (input, cell_count) = be_u16(input)?;
 
                 let (input, cell_content_offset) = be_u16(input)?;
-                let cell_content_offset = if cell_content_offset == 0 {
+                let _cell_content_offset = if cell_content_offset == 0 {
                     65536
                 } else {
                     cell_content_offset as usize
@@ -101,8 +100,8 @@ impl Page {
                 // Cell pointer array
                 let (input, cell_pointers) = count(be_u16, cell_count as usize)(input)?;
 
-                // Skip over unallocated space
-                let bytes_read = if is_first_page { 100 } else { 0 }
+                // Calculate our current position in the page
+                let mut position = if is_first_page { 100 } else { 0 }
                     + if matches!(
                         b_tree_page_type,
                         BTreePageType::IndexInterior | BTreePageType::TableInterior
@@ -112,7 +111,6 @@ impl Page {
                         8
                     }
                     + cell_count as usize * 2;
-                let (input, _) = take(cell_content_offset - bytes_read)(input)?;
 
                 // dbg!(
                 //     _first_freelock,
@@ -120,18 +118,25 @@ impl Page {
                 //     cell_content_offset,
                 //     _num_fragmented_free_bytes,
                 //     _rightmost_pointer,
-                //     cell_pointers
+                //     &cell_pointers
                 // );
 
-                // TODO: Should actually read each cell following `cell_pointers`, not consecutively
-
                 // Read cells
-                let (input, records) = count(
-                    |input| Record::parse(input, column_names),
-                    cell_count as usize,
-                )(input)?;
+                let mut rest = input;
+                let mut cells = Vec::with_capacity(cell_count as usize);
+                for cell_offset in cell_pointers.iter().rev() {
+                    let (remainder, _) = take(*cell_offset as usize - position)(rest)?;
+                    position = *cell_offset as usize;
+                    rest = remainder;
+                    let (remainder, cell) =
+                        Cell::parse(rest, *b_tree_page_type, usable_page_size, column_names)?;
+                    cells.push(cell);
+                    let cell_size = rest.len() - remainder.len();
+                    rest = remainder;
+                    position += cell_size;
+                }
 
-                (input, records)
+                (input, cells)
             }
             _ => todo!(),
         };
@@ -140,57 +145,8 @@ impl Page {
             input,
             Page {
                 ty: page_type,
-                records,
+                cells,
             },
         ))
-    }
-}
-
-#[derive(Debug)]
-pub struct Cell {}
-
-impl Cell {
-    pub fn parse(input: &[u8], ty: BTreePageType, usable_page_size: usize) -> IResult<&[u8], Self> {
-        match ty {
-            BTreePageType::TableInterior => {
-                let (input, left_child_pointer) = be_u32(input)?;
-                let (input, key) = varint(input)?;
-            }
-            BTreePageType::TableLeaf => {
-                let (input, payload_size) = varint(input)?;
-                let payload_size = payload_size as usize;
-
-                let maximum_non_overflow_payload_size = usable_page_size - 35;
-                if payload_size <= maximum_non_overflow_payload_size {
-                    // The entire payload is stored on the b-tree leaf page
-                    println!("No overflow");
-                } else {
-                    let minimum_before_overflow = ((usable_page_size - 12) * 32 / 255) - 23;
-                    let k = minimum_before_overflow
-                        + ((payload_size - minimum_before_overflow) % (usable_page_size - 4));
-                    if payload_size > k && k <= maximum_non_overflow_payload_size {
-                        // The first `k` bytes of the payload are stored on the btree page,
-                        // and the remaining `payload_size - k` bytes are stored on overflow pages.
-                        println!("Overflow of size {}", payload_size - k);
-                    } else {
-                        // The first `minimum_before_overflow` bytes of the payload are stored on the
-                        // btree page and the remaining `payload_size - minimum_before_overflow` bytes
-                        // are stored on overflow pages.
-                        println!(
-                            "Overflow of size {}",
-                            payload_size - minimum_before_overflow
-                        );
-                    }
-                }
-
-                // Record::parse(input, column_names);
-
-                // let (input, row_id) = VarInt::parse(input)?;
-            }
-            BTreePageType::IndexInterior => todo!(),
-            BTreePageType::IndexLeaf => todo!(),
-        };
-
-        todo!()
     }
 }

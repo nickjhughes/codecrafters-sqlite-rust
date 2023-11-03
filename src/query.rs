@@ -26,6 +26,7 @@ pub struct Filter {
 }
 
 impl Column {
+    #[allow(dead_code)]
     pub fn as_name(&self) -> Option<&str> {
         match self {
             Column::ColumnName(s) => Some(s),
@@ -68,7 +69,7 @@ impl Query {
                 assert_eq!(parts.next(), Some("="));
                 let column_value = {
                     let value = parts.next().unwrap();
-                    if value.starts_with("'") {
+                    if value.starts_with('\'') {
                         // Interpret as text
                         Value::Text(value.trim_matches('\'').to_owned())
                     } else {
@@ -117,38 +118,50 @@ impl Query {
                 let table_root_page = db.schema.table_root_page(&select.table_name)?;
                 let page = db.parse_page(db_data, table_root_page)?;
 
-                if select.columns.len() == 1 && matches!(select.columns[0], Column::Count) {
-                    Ok(vec![vec![page.records.len().to_string()]])
-                } else {
-                    let mut results = Vec::new();
-                    for record in page.records.iter() {
-                        let mut filtered_out = false;
-                        for filter in select.filters.iter() {
-                            let value = record
-                                .values
-                                .get(&filter.column_name)
-                                .expect("invalid column name");
-                            if *value != filter.column_value {
-                                filtered_out = true;
-                                break;
-                            }
+                let mut results = Vec::new();
+                for cell in page.cells.iter() {
+                    let mut filtered_out = false;
+                    for filter in select.filters.iter() {
+                        let value = cell
+                            .as_record()
+                            .unwrap()
+                            .values
+                            .get(&filter.column_name)
+                            .expect("invalid column name");
+                        if *value != filter.column_value {
+                            filtered_out = true;
+                            break;
                         }
-                        if filtered_out {
-                            continue;
-                        }
-
-                        let mut row = Vec::new();
-                        for column in select.columns.iter() {
-                            let column_name = column.as_name().unwrap();
-                            let value =
-                                record.values.get(column_name).expect("invalid column name");
-                            row.push(value.to_string());
-                        }
-                        results.push(row);
+                    }
+                    if filtered_out {
+                        continue;
                     }
 
-                    Ok(results)
+                    let mut row = Vec::new();
+                    for column in select.columns.iter() {
+                        match column {
+                            Column::ColumnName(column_name) => {
+                                let value = cell
+                                    .as_record()
+                                    .unwrap()
+                                    .values
+                                    .get(column_name)
+                                    .expect("invalid column name");
+                                row.push(value.to_string());
+                            }
+                            _ => {}
+                        }
+                    }
+                    results.push(row);
                 }
+
+                if matches!(select.columns[0], Column::Count) {
+                    let result_count = results.len();
+                    results.clear();
+                    results.push(vec![result_count.to_string()]);
+                }
+
+                Ok(results)
             }
             _ => todo!(),
         }

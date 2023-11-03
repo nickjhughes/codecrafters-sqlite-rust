@@ -1,6 +1,7 @@
 use anyhow::{bail, Result};
 use query::Query;
 
+mod cell;
 mod database;
 mod header;
 mod page;

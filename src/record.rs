@@ -155,7 +155,7 @@ impl Record {
         input: &'input [u8],
         column_names: &[String],
     ) -> IResult<&'input [u8], Self> {
-        let (input, _record_size) = varint(input)?;
+        // let (input, _record_size) = varint(input)?;
         let (input, _row_id) = varint(input)?;
 
         let mut header_bytes_read = 0;
