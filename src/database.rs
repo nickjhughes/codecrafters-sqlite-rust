@@ -20,7 +20,7 @@ pub struct Schema {
 #[derive(Debug)]
 pub enum ObjectSchema {
     Table(TableSchema),
-    Index,
+    Index(IndexSchema),
     View,
     Trigger,
 }
@@ -40,6 +40,15 @@ pub struct TableSchema {
     pub root_page: usize,
     pub sql: String,
     pub column_names: Vec<String>,
+}
+
+#[derive(Debug)]
+pub struct IndexSchema {
+    pub name: String,
+    pub table_name: String,
+    pub root_page: usize,
+    pub sql: String,
+    pub column_name: String,
 }
 
 impl Database {
@@ -85,17 +94,41 @@ impl Database {
                             .unwrap()
                             .as_integer()
                             .unwrap() as usize,
-                        sql: object_record
+                        sql: create_query_str.to_owned(),
+                        column_names,
+                    })
+                }
+                "index" => {
+                    let create_query_str =
+                        object_record.values.get("sql").unwrap().as_text().unwrap();
+                    let create_query = Query::parse(create_query_str)?;
+                    let column_name = create_query.as_create().unwrap().column_names[0].clone();
+
+                    ObjectSchema::Index(IndexSchema {
+                        name: object_record
                             .values
-                            .get("sql")
+                            .get("name")
                             .unwrap()
                             .as_text()
                             .unwrap()
                             .to_owned(),
-                        column_names,
+                        table_name: object_record
+                            .values
+                            .get("tbl_name")
+                            .unwrap()
+                            .as_text()
+                            .unwrap()
+                            .to_owned(),
+                        root_page: object_record
+                            .values
+                            .get("rootpage")
+                            .unwrap()
+                            .as_integer()
+                            .unwrap() as usize,
+                        sql: create_query_str.to_owned(),
+                        column_name,
                     })
                 }
-                "index" => ObjectSchema::Index,
                 _ => todo!("non-table/index object"),
             };
 
