@@ -1,13 +1,16 @@
 use nom::{
     bytes::complete::take,
     number::complete::{be_u16, be_u32, u8},
+    Err::Error,
     IResult,
 };
+
+use crate::error::{InvalidValueError, MyError};
 
 #[derive(Debug)]
 pub struct Header {
     /// The database page size in bytes.
-    pub page_size: u32,
+    pub page_size: usize,
     /// File format write version.
     pub write_version: FormatVersion,
     /// File format read version.
@@ -52,16 +55,16 @@ pub enum FormatVersion {
 }
 
 impl TryFrom<u8> for FormatVersion {
-    type Error = anyhow::Error;
+    type Error = InvalidValueError;
 
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
             1 => Ok(FormatVersion::Legacy),
             2 => Ok(FormatVersion::WriteAheadLog),
-            _ => Err(anyhow::format_err!(
+            _ => Err(InvalidValueError(format!(
                 "invalid format version value {}",
                 value
-            )),
+            ))),
         }
     }
 }
@@ -74,20 +77,23 @@ pub enum TextEncoding {
 }
 
 impl TryFrom<u32> for TextEncoding {
-    type Error = anyhow::Error;
+    type Error = InvalidValueError;
 
     fn try_from(value: u32) -> Result<Self, Self::Error> {
         match value {
             1 => Ok(TextEncoding::Utf8),
             2 => Ok(TextEncoding::Utf16le),
             3 => Ok(TextEncoding::Utf16be),
-            _ => Err(anyhow::format_err!("invalid text encoding value {}", value)),
+            _ => Err(InvalidValueError(format!(
+                "invalid text encoding value {}",
+                value
+            ))),
         }
     }
 }
 
 impl Header {
-    pub fn parse(input: &[u8]) -> IResult<&[u8], Self> {
+    pub fn parse(input: &[u8]) -> IResult<&[u8], Self, MyError<&[u8]>> {
         let (input, header_string) = take(16usize)(input)?;
         assert_eq!(header_string, b"SQLite format 3\0");
 
@@ -101,7 +107,9 @@ impl Header {
                         if value >= 512 && (value & (value - 1)) == 0 {
                             value as u32
                         } else {
-                            panic!("invalid page_size {}", value)
+                            return Err(Error(MyError::InvalidValueError(InvalidValueError(
+                                format!("invalid page size {}", value),
+                            ))));
                         }
                     }
                 },
@@ -109,9 +117,11 @@ impl Header {
         };
 
         let (input, write_version) = u8(input)?;
-        let write_version = FormatVersion::try_from(write_version).expect("invalid write version");
+        let write_version =
+            FormatVersion::try_from(write_version).map_err(|e| Error(MyError::from(e)))?;
         let (input, read_version) = u8(input)?;
-        let read_version = FormatVersion::try_from(read_version).expect("invalid read version");
+        let read_version =
+            FormatVersion::try_from(read_version).map_err(|e| Error(MyError::from(e)))?;
 
         let (input, end_page_reserved_bytes) = u8(input)?;
 
@@ -129,13 +139,18 @@ impl Header {
         let (input, schema_cookie) = be_u32(input)?;
 
         let (input, schema_format) = be_u32(input)?;
-        assert!((1..=4).contains(&schema_format), "invalid schema format");
+        if !(1..=4).contains(&schema_format) {
+            return Err(Error(MyError::InvalidValueError(InvalidValueError(
+                format!("invalid schema format {}", schema_format),
+            ))));
+        }
 
         let (input, default_page_cache_size) = be_u32(input)?;
         let (input, largest_root_btree_page) = be_u32(input)?;
 
         let (input, text_encoding) = be_u32(input)?;
-        let text_encoding = TextEncoding::try_from(text_encoding).expect("invalid text encoding");
+        let text_encoding =
+            TextEncoding::try_from(text_encoding).map_err(|e| Error(MyError::from(e)))?;
 
         let (input, user_version) = be_u32(input)?;
 
@@ -154,7 +169,7 @@ impl Header {
         Ok((
             input,
             Header {
-                page_size,
+                page_size: page_size as usize,
                 write_version,
                 read_version,
                 end_page_reserved_bytes: end_page_reserved_bytes as usize,

@@ -3,6 +3,7 @@ use query::Query;
 
 mod cell;
 mod database;
+mod error;
 mod header;
 mod page;
 mod query;
@@ -18,7 +19,7 @@ fn main() -> Result<()> {
     }
 
     let db_data = std::fs::read(&args[1])?;
-    let db = database::Database::parse(&db_data)?;
+    let db = database::Database::parse_header_and_schema(&db_data)?;
 
     let command = &args[2];
     match command.as_str() {

@@ -38,9 +38,9 @@ pub struct TableSchema {
 
 impl Database {
     /// Parse the first page of the database file, containing the header and a schema.
-    pub fn parse(input: &[u8]) -> anyhow::Result<Self> {
+    pub fn parse_header_and_schema(input: &[u8]) -> anyhow::Result<Self> {
         let (rest, header) = Header::parse(input).expect("failed to parse header");
-        let first_page_data = &rest[0..(header.page_size as usize - 100)];
+        let first_page_data = &rest[0..(header.page_size - 100)];
         let (_, first_page) = Page::parse(
             first_page_data,
             true,
@@ -51,7 +51,7 @@ impl Database {
                 "rootpage".to_string(),
                 "sql".to_string(),
             ],
-            header.page_size as usize - header.end_page_reserved_bytes,
+            header.page_size - header.end_page_reserved_bytes,
         )
         .expect("failed to parse first page");
 
@@ -114,14 +114,14 @@ impl Database {
             .map(|o| o.as_table().unwrap().column_names.clone())
             .unwrap();
 
-        let page_input = &input[self.header.page_size as usize * (page_index - 1)
-            ..self.header.page_size as usize * (page_index - 1) + self.header.page_size as usize];
+        let page_input = &input[self.header.page_size * (page_index - 1)
+            ..self.header.page_size * (page_index - 1) + self.header.page_size];
 
         Ok(Page::parse(
             page_input,
             false,
             &column_names,
-            self.header.page_size as usize - self.header.end_page_reserved_bytes,
+            self.header.page_size - self.header.end_page_reserved_bytes,
         )
         .expect("failed to parse page")
         .1)
